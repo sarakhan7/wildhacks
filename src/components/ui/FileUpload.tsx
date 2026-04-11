@@ -13,7 +13,7 @@ interface FileUploadProps {
 export function FileUpload({ 
   onFilesSelected, 
   maxFiles = 12, 
-  accept = "application/pdf,image/png,image/jpeg",
+  accept = "application/pdf,image/png,image/jpeg,image/webp",
   className = "" 
 }: FileUploadProps) {
   const [dragActive, setDragActive] = useState(false);
@@ -87,7 +87,7 @@ export function FileUpload({
         <h3 className="text-lg font-medium mb-1">Drag & drop utility bills here</h3>
         <p className="text-sm text-[var(--text-muted)] mb-4 text-center">
           Upload up to 12 months of utility bills (PDFs or images).<br/>
-          We support electric and gas bills.
+          Embedded-text PDFs are parsed directly. JPG, PNG, and WEBP bills use Gemini OCR when configured.
         </p>
         <button className="btn-secondary py-2 text-sm pointer-events-none">
           Browse Files

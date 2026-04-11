@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Map, { Marker } from "react-map-gl/mapbox";
@@ -15,17 +15,29 @@ import type { AuditResultsBundle, AuditStatus } from "@/lib/audit-api";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
+type LocationSuggestion = {
+  id: string;
+  name: string;
+  full_address: string;
+  place_formatted: string;
+  feature_type: string;
+  center: [number, number];
+};
+
 export default function AuditWizard() {
   const router = useRouter();
   const { buildingInfo, setBuildingInfo, setAuditResults, setAuditId } = useAudit();
   
   const [activeStep, setActiveStep] = useState(0);
   const [addressSearch, setAddressSearch] = useState("");
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [isSearchingLocation, setIsSearchingLocation] = useState(false);
   const [locationError, setLocationError] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [analysisStage, setAnalysisStage] = useState(0);
   const [analysisError, setAnalysisError] = useState("");
+  const skipNextAutocompleteRef = useRef(false);
 
   const steps = ["Location", "Details", "Systems", "Data"];
 
@@ -44,35 +56,105 @@ export default function AuditWizard() {
     failed: 4,
   };
 
+  const searchLocations = async (query: string, signal?: AbortSignal) => {
+    const res = await fetch(`/api/geocode?query=${encodeURIComponent(query)}`, {
+      signal,
+      cache: "no-store",
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Location search failed");
+    }
+
+    return (data.features ?? []) as LocationSuggestion[];
+  };
+
+  const selectLocation = (feature: LocationSuggestion) => {
+    skipNextAutocompleteRef.current = true;
+    setAddressSearch(feature.full_address);
+    setLocationSuggestions([]);
+    setLocationError("");
+    setBuildingInfo({
+      address: feature.full_address,
+      lng: feature.center[0],
+      lat: feature.center[1],
+    });
+  };
+
+  useEffect(() => {
+    const query = addressSearch.trim();
+
+    if (skipNextAutocompleteRef.current) {
+      skipNextAutocompleteRef.current = false;
+      setIsSearchingLocation(false);
+      return;
+    }
+
+    if (query.length < 3) {
+      setLocationSuggestions([]);
+      setIsSearchingLocation(false);
+      setLocationError("");
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setIsSearchingLocation(true);
+        const features = await searchLocations(query, controller.signal);
+        setLocationSuggestions(features);
+        if (features.length === 0) {
+          setLocationError("No matching addresses found yet. Keep typing a street number and city.");
+        } else {
+          setLocationError("");
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setLocationSuggestions([]);
+        setLocationError(error instanceof Error ? error.message : "Location search failed");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingLocation(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [addressSearch]);
+
   // Step 1: Location geocoding handler
   const handleGeocode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addressSearch) return;
-    
+    if (!addressSearch.trim()) return;
+
     try {
       setLocationError("");
+      setIsSearchingLocation(true);
+      const features = await searchLocations(addressSearch.trim());
 
-      const res = await fetch(`/api/geocode?query=${encodeURIComponent(addressSearch)}`);
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Location search failed");
-      }
-
-      if (data.features && data.features.length > 0) {
-        const feature = data.features[0];
-        setBuildingInfo({
-          address: feature.place_name,
-          lng: feature.center[0],
-          lat: feature.center[1],
-        });
+      if (features.length === 1) {
+        selectLocation(features[0]);
         return;
       }
 
-      setLocationError("No matching addresses found. Try a more specific search.");
+      setLocationSuggestions(features);
+      if (features.length > 1) {
+        setLocationError("Select the exact address from the list below.");
+        return;
+      }
+
+      setLocationError("No matching addresses found. Try a full street address with number, city, and state.");
     } catch (error) {
       console.error("Geocoding failed:", error);
       setLocationError(error instanceof Error ? error.message : "Location search failed");
+    } finally {
+      setIsSearchingLocation(false);
     }
   };
 
@@ -187,7 +269,7 @@ export default function AuditWizard() {
               activeStageIdx={analysisStage}
               stages={[
                 "Initiating analysis sequence...",
-                "Running Gemini OCR on utility bills",
+                "Parsing PDFs and OCRing bill images",
                 "Calculating consumption footprint & weather signature",
                 "Drafting engineering diagnostic report",
                 "Finalizing results dashboard"
@@ -223,17 +305,54 @@ export default function AuditWizard() {
                   type="text" 
                   value={addressSearch}
                   onChange={(e) => {
+                    skipNextAutocompleteRef.current = false;
                     setAddressSearch(e.target.value);
                     if (locationError) {
                       setLocationError("");
                     }
                   }}
-                  placeholder="Enter building address (e.g., 100 Main St, Chicago, IL)"
+                  placeholder="Search by building name or address (e.g., Technological Institute Evanston)"
                   className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl py-3 pl-10 pr-4 text-white placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] transition-colors"
                 />
               </div>
-              <button type="submit" className="btn-secondary whitespace-nowrap">Search</button>
+              <button type="submit" className="btn-secondary whitespace-nowrap">
+                {isSearchingLocation ? "Searching..." : "Search"}
+              </button>
             </form>
+
+            <p className="text-sm text-[var(--text-muted)]">
+              Search by building name or street address. Suggestions appear as you type so you can choose the exact property.
+            </p>
+
+            {(isSearchingLocation || locationSuggestions.length > 0) && (
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] overflow-hidden">
+                {isSearchingLocation && locationSuggestions.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-[var(--text-muted)]">Looking up address matches...</div>
+                ) : (
+                  <ul className="divide-y divide-[var(--border-subtle)]">
+                    {locationSuggestions.map((feature, index) => (
+                      <li key={`${feature.id}-${index}`}>
+                        <button
+                          type="button"
+                          onClick={() => selectLocation(feature)}
+                          className="w-full px-4 py-3 text-left hover:bg-white/5 transition-colors"
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="font-medium text-white">{feature.full_address}</span>
+                            <span className="shrink-0 rounded-full bg-[var(--bg-primary)] px-2 py-1 text-xs text-[var(--text-muted)] uppercase">
+                              {feature.feature_type || "match"}
+                            </span>
+                          </div>
+                          {feature.place_formatted && (
+                            <div className="mt-1 text-sm text-[var(--text-muted)]">{feature.place_formatted}</div>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {locationError && (
               <p className="text-sm text-red-300">{locationError}</p>

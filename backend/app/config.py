@@ -11,6 +11,32 @@ DATA_DIR = BACKEND_ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 
 
+def _load_dotenv_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if not key:
+            continue
+
+        if value and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+
+        os.environ.setdefault(key, value)
+
+
+for dotenv_name in (".env", ".env.local"):
+    _load_dotenv_file(REPO_ROOT / dotenv_name)
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "AuditAI Backend"

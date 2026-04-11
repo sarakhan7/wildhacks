@@ -19,6 +19,7 @@ from .schemas import (
     OCRReading,
 )
 from .services.ocr import OCRService
+from .schemas import UploadedDocument
 from .services.reasoning import ReasoningService
 from .services.weather import WeatherService
 
@@ -43,14 +44,22 @@ class AuditPipeline:
         warnings: list[str] = []
         try:
             self.repository.update_status(audit_id, status="running", stage="ocr", progress=10)
-            raw_readings = self._extract_documents(audit_id)
+            documents = self.repository.list_documents(audit_id)
+            raw_readings = self._extract_documents(documents)
             self.repository.save_raw_readings(audit_id, raw_readings)
 
             self.repository.update_status(audit_id, status="running", stage="normalize", progress=25)
             normalized = self._normalize_readings(raw_readings, warnings)
             if not normalized:
+                if documents:
+                    if any(self._is_image_document(document) for document in documents):
+                        raise RuntimeError(
+                            "No utility data could be extracted from the uploaded images. "
+                            "Configure GEMINI_API_KEY for image OCR, or upload embedded-text PDFs."
+                        )
+                    raise RuntimeError("No utility data could be extracted from the uploaded files.")
                 normalized = self._build_demo_readings()
-                warnings.append("No readable utility rows were extracted. Demo readings were generated so the pipeline could complete.")
+                warnings.append("No files were uploaded. Demo readings were generated so the pipeline could complete.")
             self.repository.save_normalized_readings(audit_id, normalized)
 
             self.repository.update_status(audit_id, status="running", stage="weather", progress=40, warnings=warnings)
@@ -116,13 +125,17 @@ class AuditPipeline:
     def rerun_from_review(self, audit_id: str) -> None:
         self.run(audit_id)
 
-    def _extract_documents(self, audit_id: str) -> list[OCRReading]:
-        documents = self.repository.list_documents(audit_id)
+    def _extract_documents(self, documents: list[UploadedDocument]) -> list[OCRReading]:
         readings: list[OCRReading] = []
         for document in documents:
             result = self.ocr_service.extract(document)
             readings.extend(result.readings)
         return readings
+
+    def _is_image_document(self, document: UploadedDocument) -> bool:
+        mime_type = (document.mime_type or "").lower()
+        filename = document.filename.lower()
+        return mime_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
     def _normalize_readings(self, readings: list[OCRReading], warnings: list[str]) -> list[NormalizedUtilityReading]:
         deduped: dict[str, NormalizedUtilityReading] = {}

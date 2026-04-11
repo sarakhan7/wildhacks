@@ -3,10 +3,10 @@ from __future__ import annotations
 import base64
 import json
 import re
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib import error, request
+import zlib
 
 from ..schemas import OCRDocumentResult, OCRReading, UploadedDocument
 
@@ -17,6 +17,9 @@ class OCRService:
         self.model = model
 
     def extract(self, document: UploadedDocument) -> OCRDocumentResult:
+        deterministic = _extract_structured_pdf(document)
+        if deterministic is not None:
+            return deterministic
         if self.gemini_api_key:
             try:
                 return self._extract_with_gemini(document)
@@ -88,38 +91,187 @@ class OCRService:
         )
 
     def _fallback_extract(self, document: UploadedDocument) -> OCRDocumentResult:
-        guessed_month = _guess_month_from_filename(document.filename)
-        readings: list[OCRReading] = []
-        if guessed_month:
-            readings.append(
-                OCRReading(
-                    month=guessed_month,
-                    kwh=9000,
-                    therms=120,
-                    peak_kw=18,
-                    cost=1450,
-                    confidence=0.35,
-                    source_document_id=document.document_id,
-                    source_pages=[1],
-                    extraction_notes=["Fallback OCR used because AI OCR was unavailable."],
-                )
-            )
+        notes = []
+        if _is_image_document(document):
+            notes.append("Image OCR requires GEMINI_API_KEY. No structured readings were extracted.")
+        else:
+            notes.append("No structured bill parser matched this document, and AI OCR was unavailable.")
         return OCRDocumentResult(
             document_id=document.document_id,
             filename=document.filename,
-            overall_confidence=0.35,
-            readings=readings,
-            notes=["Fallback OCR inferred limited data from filename only."],
+            overall_confidence=0.0,
+            readings=[],
+            notes=notes,
             provider="fallback",
         )
 
 
-def _guess_month_from_filename(filename: str) -> str | None:
-    match = re.search(r"(20\d{2})[-_ ]?([01]?\d)", filename)
-    if not match:
+def _is_image_document(document: UploadedDocument) -> bool:
+    mime_type = (document.mime_type or "").lower()
+    filename = document.filename.lower()
+    return mime_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".webp"))
+
+
+def _extract_structured_pdf(document: UploadedDocument) -> OCRDocumentResult | None:
+    if document.mime_type != "application/pdf" and not document.filename.lower().endswith(".pdf"):
         return None
-    year = match.group(1)
-    month = int(match.group(2))
-    if month < 1 or month > 12:
+
+    pdf_bytes = Path(document.storage_path).read_bytes()
+    strings = _extract_pdf_strings(pdf_bytes)
+    if not strings:
         return None
-    return f"{year}-{month:02d}"
+
+    fields = _extract_label_value_pairs(strings)
+    if "Billing Period:" not in fields or "Electric Usage (kWh)" not in fields or "Total Amount Due ($)" not in fields:
+        return None
+
+    month = _parse_billing_month(fields["Billing Period:"])
+    if month is None:
+        return None
+
+    peak_kw = _parse_number(fields.get("Peak Demand (kW)"))
+    total_due = _parse_number(fields.get("Total Amount Due ($)")) or 0.0
+    supply = _parse_number(fields.get("Supply Charges ($)"))
+    delivery = _parse_number(fields.get("Delivery Charges ($)"))
+    cost = total_due if total_due > 0 else (supply or 0.0) + (delivery or 0.0)
+
+    reading = OCRReading(
+        month=month,
+        kwh=_parse_number(fields.get("Electric Usage (kWh)")) or 0.0,
+        therms=0.0,
+        peak_kw=peak_kw,
+        cost=cost,
+        confidence=0.99,
+        source_document_id=document.document_id,
+        source_pages=[1],
+        extraction_notes=["Structured PDF text parser extracted ComEd demo bill fields."],
+    )
+
+    notes = [
+        "Parsed embedded PDF text directly; OCR was not required.",
+    ]
+    if "Service Address:" in fields:
+        notes.append(f"Service address label: {fields['Service Address:']}")
+    if "Address:" in fields:
+        notes.append(f"Parsed address: {fields['Address:']}")
+
+    return OCRDocumentResult(
+        document_id=document.document_id,
+        filename=document.filename,
+        overall_confidence=0.99,
+        readings=[reading],
+        notes=notes,
+        provider="structured_pdf_text",
+    )
+
+
+def _extract_label_value_pairs(strings: list[str]) -> dict[str, str]:
+    labels = {
+        "Customer Name:",
+        "Service Address:",
+        "Address:",
+        "Billing Period:",
+        "Meter Number:",
+        "Electric Usage (kWh)",
+        "Peak Demand (kW)",
+        "Supply Charges ($)",
+        "Delivery Charges ($)",
+        "Total Amount Due ($)",
+    }
+    pairs: dict[str, str] = {}
+    for index, value in enumerate(strings[:-1]):
+        if value in labels:
+            pairs[value] = strings[index + 1].strip()
+    return pairs
+
+
+def _parse_billing_month(period_text: str) -> str | None:
+    matches = re.findall(r"(\d{2}/\d{2}/\d{4})", period_text)
+    if not matches:
+        return None
+    end_date = matches[-1]
+    month, _day, year = end_date.split("/")
+    return f"{year}-{month}"
+
+
+def _parse_number(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = value.replace(",", "").replace("$", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _extract_pdf_strings(pdf_bytes: bytes) -> list[str]:
+    strings: list[str] = []
+    for match in re.finditer(br"stream\r?\n(.*?)endstream", pdf_bytes, re.S):
+        raw_stream = match.group(1).strip()
+        try:
+            decoded = base64.a85decode(raw_stream, adobe=True)
+            content = zlib.decompress(decoded).decode("latin1", "replace")
+        except Exception:
+            continue
+        strings.extend(_parse_pdf_literal_strings(content))
+    return [value.strip() for value in strings if value.strip()]
+
+
+def _parse_pdf_literal_strings(content: str) -> list[str]:
+    parsed: list[str] = []
+    current: list[str] = []
+    in_string = False
+    depth = 0
+    index = 0
+
+    while index < len(content):
+        char = content[index]
+        if not in_string:
+            if char == "(":
+                in_string = True
+                depth = 1
+                current = []
+            index += 1
+            continue
+
+        if char == "\\":
+            index += 1
+            if index >= len(content):
+                break
+            escaped = content[index]
+            if escaped in "\\()":
+                current.append(escaped)
+            elif escaped.isdigit():
+                octal = escaped
+                for _ in range(2):
+                    if index + 1 < len(content) and content[index + 1].isdigit():
+                        index += 1
+                        octal += content[index]
+                    else:
+                        break
+                current.append(chr(int(octal, 8)))
+            else:
+                current.append(escaped)
+            index += 1
+            continue
+
+        if char == "(":
+            depth += 1
+            current.append(char)
+            index += 1
+            continue
+
+        if char == ")":
+            depth -= 1
+            if depth == 0:
+                parsed.append("".join(current))
+                in_string = False
+            else:
+                current.append(char)
+            index += 1
+            continue
+
+        current.append(char)
+        index += 1
+
+    return parsed
