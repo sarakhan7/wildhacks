@@ -6,7 +6,13 @@ from typing import Iterable
 
 from .analytics.anomaly import detect_anomalies
 from .analytics.peer import PeerClusterService
-from .analytics.prism import KWH_TO_KBTU, THERMS_TO_KBTU, fit_prism_model
+from .analytics.prism import (
+    KWH_TO_KBTU,
+    THERMS_TO_KBTU,
+    estimate_prism_components,
+    fit_prism_model,
+    fit_prism_series,
+)
 from .repository import AuditRepository
 from .schemas import (
     AnalysisResults,
@@ -73,7 +79,7 @@ class AuditPipeline:
                 anomaly_months = {signal.month for signal in anomalies if signal.flagged}
             prism = fit_prism_model(normalized, weather, anomaly_months)
             peer = self.peer_service.assign(building, self._compute_site_eui(normalized, building), self.weather_service.derive_climate_zone(building))
-            analysis = self._build_analysis(building, normalized, prism, anomalies, peer)
+            analysis = self._build_analysis(building, normalized, weather, prism, anomalies, peer, anomaly_months)
             self.repository.save_peer_assignment(audit_id, peer)
             self.repository.save_analysis(audit_id, analysis)
 
@@ -96,7 +102,7 @@ class AuditPipeline:
                 warnings=warnings,
                 metadata={"anomalies": [signal.model_dump() for signal in anomalies]},
             )
-            recommendations, financials = self.reasoning_service.recommend(building, analysis, hypotheses)
+            recommendations, financials = self.reasoning_service.recommend(building, analysis, peer, hypotheses)
             self.repository.save_recommendations(audit_id, recommendations)
             self.repository.save_financials(audit_id, financials)
 
@@ -195,11 +201,13 @@ class AuditPipeline:
         self,
         building: BuildingProfile,
         readings: list[NormalizedUtilityReading],
+        weather,
         prism,
         anomalies: list[ChangepointSignal],
         peer,
+        anomaly_months: set[str],
     ) -> AnalysisResults:
-        anomaly_months = {signal.month for signal in anomalies if signal.flagged}
+        flagged_months = {signal.month for signal in anomalies if signal.flagged}
         monthly_breakdown: list[MonthlyBreakdown] = []
         total_electricity = 0.0
         total_gas = 0.0
@@ -221,30 +229,61 @@ class AuditPipeline:
                     gasKbtu=round(gas_kbtu, 2),
                     totalKbtu=round(total_kbtu, 2),
                     cost=reading.cost,
-                    isAnomaly=reading.month in anomaly_months,
+                    isAnomaly=reading.month in flagged_months,
                 )
             )
 
         peak = max(monthly_breakdown, key=lambda row: row.totalKbtu)
         low = min(monthly_breakdown, key=lambda row: row.totalKbtu)
         seasonal_variation = peak.totalKbtu / max(low.totalKbtu, 1)
-        baseload = prism.baseload_kbtu_per_month
-        heating_energy = prism.heating_slope_kbtu_per_hdd * 30
-        cooling_energy = prism.cooling_slope_kbtu_per_cdd * 30
-        baseload_percent = min(100.0, (baseload * len(readings) / max(total_energy, 1)) * 100)
-        heating_percent = min(100.0 - baseload_percent, (heating_energy * len(readings) / max(total_energy, 1)) * 100)
-        cooling_percent = min(100.0 - baseload_percent - heating_percent, (cooling_energy * len(readings) / max(total_energy, 1)) * 100)
+
+        modeled_months = [reading.month for reading in readings if reading.month not in anomaly_months]
+        weighted_rows = [(reading.month, reading.kwh * KWH_TO_KBTU, max(reading.confidence, 0.25)) for reading in readings]
+        electric_prism = fit_prism_series(weighted_rows, weather, anomaly_months)
+        gas_rows = [(reading.month, reading.therms * THERMS_TO_KBTU, max(reading.confidence, 0.25)) for reading in readings]
+        gas_prism = fit_prism_series(gas_rows, weather, anomaly_months)
+
+        electric_baseload, electric_heating, electric_cooling = estimate_prism_components(electric_prism, weather, modeled_months)
+        gas_baseload, gas_heating, _gas_cooling = estimate_prism_components(gas_prism, weather, modeled_months)
+
+        electric_actual = sum(reading.kwh * KWH_TO_KBTU for reading in readings if reading.month in modeled_months)
+        gas_actual = sum(reading.therms * THERMS_TO_KBTU for reading in readings if reading.month in modeled_months)
+
+        electric_baseload, electric_heating, electric_cooling = self._scale_components_to_total(
+            electric_baseload,
+            electric_heating,
+            electric_cooling,
+            electric_actual,
+        )
+        gas_baseload, gas_heating = self._scale_two_components_to_total(
+            gas_baseload,
+            gas_heating,
+            gas_actual,
+        )
+
+        baseload_total = electric_baseload + gas_baseload
+        heating_total = electric_heating + gas_heating
+        cooling_total = electric_cooling
+        assigned_total = baseload_total + heating_total + cooling_total
+        residual = max(0.0, total_energy - assigned_total)
+        baseload_total += residual
+
+        baseload_percent = (baseload_total / max(total_energy, 1)) * 100
+        heating_percent = (heating_total / max(total_energy, 1)) * 100
+        cooling_percent = (cooling_total / max(total_energy, 1)) * 100
         peak_kw_values = [reading.peak_kw for reading in readings if reading.peak_kw is not None]
         avg_demand = total_electricity / max(len(readings) * 730, 1)
         load_factor = avg_demand / max(max(peak_kw_values), 1) if peak_kw_values else None
-        annual_savings = max(0.0, (peer.median_eui - min(peer.median_eui, total_energy / max(building.squareFeet, 1))) * building.squareFeet * (total_cost / max(total_energy, 1)))
+        site_eui = total_energy / max(building.squareFeet, 1)
+        excess_cost = max(0.0, (site_eui - peer.median_eui) * building.squareFeet * (total_cost / max(total_energy, 1)))
+        annual_savings = min(total_cost * 0.30, excess_cost * 0.40)
 
         return AnalysisResults(
             totalElectricity=round(total_electricity, 2),
             totalGas=round(total_gas, 2),
             totalEnergy=round(total_energy, 2),
             totalCost=round(total_cost, 2),
-            siteEUI=round(total_energy / max(building.squareFeet, 1), 2),
+            siteEUI=round(site_eui, 2),
             costPerSqFt=round(total_cost / max(building.squareFeet, 1), 2),
             electricIntensity=round(total_electricity / max(building.squareFeet, 1), 2),
             gasIntensity=round(total_gas / max(building.squareFeet, 1), 2),
@@ -253,7 +292,7 @@ class AuditPipeline:
             peakMonth=peak.label,
             lowestMonth=low.label,
             seasonalVariation=round(seasonal_variation, 2),
-            estimatedBaseload=round(baseload, 2),
+            estimatedBaseload=round(baseload_total / max(len(readings), 1), 2),
             heatingPercent=round(max(0.0, heating_percent), 1),
             coolingPercent=round(max(0.0, cooling_percent), 1),
             baseloadPercent=round(max(0.0, baseload_percent), 1),
@@ -264,3 +303,28 @@ class AuditPipeline:
             anomalyCount=sum(1 for row in monthly_breakdown if row.isAnomaly),
             prism=prism,
         )
+
+    def _scale_components_to_total(
+        self,
+        baseload: float,
+        heating: float,
+        cooling: float,
+        actual_total: float,
+    ) -> tuple[float, float, float]:
+        modeled_total = baseload + heating + cooling
+        if modeled_total <= 0 or actual_total <= 0:
+            return 0.0, 0.0, 0.0
+        scale = actual_total / modeled_total
+        return baseload * scale, heating * scale, cooling * scale
+
+    def _scale_two_components_to_total(
+        self,
+        baseload: float,
+        heating: float,
+        actual_total: float,
+    ) -> tuple[float, float]:
+        modeled_total = baseload + heating
+        if modeled_total <= 0 or actual_total <= 0:
+            return 0.0, 0.0
+        scale = actual_total / modeled_total
+        return baseload * scale, heating * scale

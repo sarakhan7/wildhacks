@@ -35,7 +35,7 @@ pipeline = AuditPipeline(
     repository=repository,
     ocr_service=OCRService(settings.gemini_api_key, settings.ocr_model),
     weather_service=WeatherService(settings.noaa_api_token),
-    reasoning_service=ReasoningService(settings.gemini_api_key or settings.anthropic_api_key, settings.reasoning_model),
+    reasoning_service=ReasoningService(settings.gemini_api_key, settings.reasoning_model),
     peer_service=PeerClusterService(Path(__file__).resolve().parents[1] / "data" / "cbecs_clusters.json"),
 )
 

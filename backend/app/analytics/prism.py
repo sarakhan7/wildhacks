@@ -20,10 +20,30 @@ def fit_prism_model(
     weather: Iterable[WeatherMonthFeature],
     excluded_months: set[str] | None = None,
 ) -> PrismFit:
+    rows = [
+        (
+            reading.month,
+            reading_to_total_kbtu(reading),
+            max(reading.confidence, 0.25),
+        )
+        for reading in readings
+    ]
+    return fit_prism_series(rows, weather, excluded_months)
+
+
+def fit_prism_series(
+    rows: Iterable[tuple[str, float, float]],
+    weather: Iterable[WeatherMonthFeature],
+    excluded_months: set[str] | None = None,
+) -> PrismFit:
     excluded = excluded_months or set()
     weather_by_month = {feature.month: feature for feature in weather}
-    rows = [reading for reading in readings if reading.month in weather_by_month and reading.month not in excluded]
-    if len(rows) < 3:
+    filtered_rows = [
+        (month, value, weight)
+        for month, value, weight in rows
+        if month in weather_by_month and month not in excluded
+    ]
+    if len(filtered_rows) < 3:
         return PrismFit(
             base_temperature_f=65,
             r_squared=0,
@@ -38,11 +58,12 @@ def fit_prism_model(
         targets = []
         design = []
         weights = []
-        for reading in rows:
-            feature = weather_by_month[reading.month]
-            targets.append(reading_to_total_kbtu(reading))
-            design.append([1.0, max(feature.hdd + (65 - base_temp), 0), max(feature.cdd + (base_temp - 65), 0)])
-            weights.append(max(reading.confidence, 0.25))
+        for month, value, weight in filtered_rows:
+            feature = weather_by_month[month]
+            hdd_term, cdd_term = prism_degree_day_terms(feature, float(base_temp))
+            targets.append(value)
+            design.append([1.0, hdd_term, cdd_term])
+            weights.append(weight)
 
         y = np.asarray(targets, dtype=float)
         x = np.asarray(design, dtype=float)
@@ -66,5 +87,37 @@ def fit_prism_model(
         baseload_kbtu_per_month=max(0, round(baseload, 2)),
         heating_slope_kbtu_per_hdd=max(0, round(heating_slope, 4)),
         cooling_slope_kbtu_per_cdd=max(0, round(cooling_slope, 4)),
-        modeled_months=[reading.month for reading in rows],
+        modeled_months=[month for month, _value, _weight in filtered_rows],
+    )
+
+
+def prism_degree_day_terms(feature: WeatherMonthFeature, base_temperature_f: float) -> tuple[float, float]:
+    heating_term = max(feature.hdd + (65 - base_temperature_f), 0)
+    cooling_term = max(feature.cdd + (base_temperature_f - 65), 0)
+    return float(heating_term), float(cooling_term)
+
+
+def estimate_prism_components(
+    prism: PrismFit,
+    weather: Iterable[WeatherMonthFeature],
+    months: Iterable[str],
+) -> tuple[float, float, float]:
+    weather_by_month = {feature.month: feature for feature in weather}
+    baseload_total = 0.0
+    heating_total = 0.0
+    cooling_total = 0.0
+
+    for month in months:
+        feature = weather_by_month.get(month)
+        if feature is None:
+            continue
+        hdd_term, cdd_term = prism_degree_day_terms(feature, prism.base_temperature_f)
+        baseload_total += prism.baseload_kbtu_per_month
+        heating_total += prism.heating_slope_kbtu_per_hdd * hdd_term
+        cooling_total += prism.cooling_slope_kbtu_per_cdd * cdd_term
+
+    return (
+        max(0.0, baseload_total),
+        max(0.0, heating_total),
+        max(0.0, cooling_total),
     )

@@ -122,38 +122,9 @@ def _extract_structured_pdf(document: UploadedDocument) -> OCRDocumentResult | N
         return None
 
     fields = _extract_label_value_pairs(strings)
-    if "Billing Period:" not in fields or "Electric Usage (kWh)" not in fields or "Total Amount Due ($)" not in fields:
+    reading, notes = _build_structured_pdf_reading(document, strings, fields)
+    if reading is None:
         return None
-
-    month = _parse_billing_month(fields["Billing Period:"])
-    if month is None:
-        return None
-
-    peak_kw = _parse_number(fields.get("Peak Demand (kW)"))
-    total_due = _parse_number(fields.get("Total Amount Due ($)")) or 0.0
-    supply = _parse_number(fields.get("Supply Charges ($)"))
-    delivery = _parse_number(fields.get("Delivery Charges ($)"))
-    cost = total_due if total_due > 0 else (supply or 0.0) + (delivery or 0.0)
-
-    reading = OCRReading(
-        month=month,
-        kwh=_parse_number(fields.get("Electric Usage (kWh)")) or 0.0,
-        therms=0.0,
-        peak_kw=peak_kw,
-        cost=cost,
-        confidence=0.99,
-        source_document_id=document.document_id,
-        source_pages=[1],
-        extraction_notes=["Structured PDF text parser extracted ComEd demo bill fields."],
-    )
-
-    notes = [
-        "Parsed embedded PDF text directly; OCR was not required.",
-    ]
-    if "Service Address:" in fields:
-        notes.append(f"Service address label: {fields['Service Address:']}")
-    if "Address:" in fields:
-        notes.append(f"Parsed address: {fields['Address:']}")
 
     return OCRDocumentResult(
         document_id=document.document_id,
@@ -165,18 +136,97 @@ def _extract_structured_pdf(document: UploadedDocument) -> OCRDocumentResult | N
     )
 
 
+def _build_structured_pdf_reading(
+    document: UploadedDocument,
+    strings: list[str],
+    fields: dict[str, str],
+) -> tuple[OCRReading | None, list[str]]:
+    legacy_period = fields.get("Billing Period:")
+    legacy_kwh = fields.get("Electric Usage (kWh)")
+    if legacy_period and legacy_kwh:
+        month = _parse_billing_month(legacy_period)
+        if month is None:
+            return None, []
+
+        peak_kw = _parse_number(fields.get("Peak Demand (kW)"))
+        total_due = _parse_number(fields.get("Total Amount Due ($)")) or 0.0
+        supply = _parse_number(fields.get("Supply Charges ($)"))
+        delivery = _parse_number(fields.get("Delivery Charges ($)"))
+        cost = total_due if total_due > 0 else (supply or 0.0) + (delivery or 0.0)
+
+        reading = OCRReading(
+            month=month,
+            kwh=_parse_number(legacy_kwh) or 0.0,
+            therms=0.0,
+            peak_kw=peak_kw,
+            cost=cost,
+            confidence=0.99,
+            source_document_id=document.document_id,
+            source_pages=[1],
+            extraction_notes=["Structured PDF text parser extracted ComEd demo bill fields."],
+        )
+
+        notes = [
+            "Parsed embedded PDF text directly; OCR was not required.",
+        ]
+        if "Service Address:" in fields:
+            notes.append(f"Service address label: {fields['Service Address:']}")
+        if "Address:" in fields:
+            notes.append(f"Parsed address: {fields['Address:']}")
+        return reading, notes
+
+    nw_period = fields.get("Billing Period")
+    nw_kwh = fields.get("Usage (kWh)")
+    nw_therms = fields.get("Gas Usage (Therms)")
+    if nw_period and nw_kwh and nw_therms:
+        month = _parse_billing_month(nw_period)
+        if month is None:
+            return None, []
+
+        electric_total = _parse_number(fields.get("Electric Total ($)")) or 0.0
+        gas_total = _parse_number(fields.get("Gas Total ($)")) or 0.0
+        total_utility = _parse_inline_currency(strings, "Total Utility Charges This Period:")
+        cost = total_utility if total_utility is not None else electric_total + gas_total
+
+        reading = OCRReading(
+            month=month,
+            kwh=_parse_number(nw_kwh) or 0.0,
+            therms=_parse_number(nw_therms) or 0.0,
+            peak_kw=_parse_number(fields.get("Peak Demand (kW)")),
+            cost=cost,
+            confidence=0.99,
+            source_document_id=document.document_id,
+            source_pages=[1],
+            extraction_notes=["Structured PDF text parser extracted Northwestern dual-fuel utility statement fields."],
+        )
+
+        notes = [
+            "Parsed embedded PDF text directly; OCR was not required.",
+        ]
+        if len(strings) > 1:
+            notes.append(f"Parsed address: {strings[1]}")
+        return reading, notes
+
+    return None, []
+
+
 def _extract_label_value_pairs(strings: list[str]) -> dict[str, str]:
     labels = {
         "Customer Name:",
         "Service Address:",
         "Address:",
         "Billing Period:",
+        "Billing Period",
         "Meter Number:",
         "Electric Usage (kWh)",
+        "Usage (kWh)",
         "Peak Demand (kW)",
         "Supply Charges ($)",
         "Delivery Charges ($)",
         "Total Amount Due ($)",
+        "Electric Total ($)",
+        "Gas Usage (Therms)",
+        "Gas Total ($)",
     }
     pairs: dict[str, str] = {}
     for index, value in enumerate(strings[:-1]):
@@ -202,6 +252,15 @@ def _parse_number(value: str | None) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _parse_inline_currency(strings: list[str], prefix: str) -> float | None:
+    for value in strings:
+        if value.startswith(prefix):
+            match = re.search(r"\$([\d,]+(?:\.\d+)?)", value)
+            if match:
+                return _parse_number(match.group(1))
+    return None
 
 
 def _extract_pdf_strings(pdf_bytes: bytes) -> list[str]:

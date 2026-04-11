@@ -54,8 +54,8 @@ class Settings:
     supabase_service_role_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     supabase_storage_bucket: str = os.getenv("SUPABASE_STORAGE_BUCKET", "audit-documents")
     default_reasoning_provider: str = os.getenv("AUDITAI_REASONING_PROVIDER", "gemini")
-    ocr_model: str = os.getenv("AUDITAI_OCR_MODEL", "gemini-2.0-flash")
-    reasoning_model: str = os.getenv("AUDITAI_REASONING_MODEL", "gemini-2.0-flash")
+    ocr_model: str = os.getenv("AUDITAI_OCR_MODEL", "gemini-flash-latest")
+    reasoning_model: str = os.getenv("AUDITAI_REASONING_MODEL", "gemini-pro-latest")
     max_workers: int = int(os.getenv("AUDITAI_MAX_WORKERS", "2"))
 
 
