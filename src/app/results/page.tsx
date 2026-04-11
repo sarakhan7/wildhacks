@@ -7,17 +7,26 @@ import { useAudit } from "@/context/AuditContext";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import Map, { Marker, Layer } from "react-map-gl/mapbox";
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { calculateEUIPercentile, getBenchmarkForType } from "@/lib/benchmarks";
+import { getBenchmarkForType } from "@/lib/benchmarks";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GaugeChart } from "@/components/ui/GaugeChart";
-import { BatteryWarning, Leaf, Zap, FileText, ArrowUpRight, TrendingDown, ThermometerSnowflake, DollarSign } from "lucide-react";
+import { BatteryWarning, Leaf, Zap, FileText, ArrowUpRight, TrendingDown, ThermometerSnowflake, DollarSign, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
 export default function ResultsDashboard() {
   const router = useRouter();
-  const { buildingInfo, analysisResults, reportMarkdown } = useAudit();
+  const {
+    buildingInfo,
+    analysisResults,
+    reportMarkdown,
+    peerInsights,
+    anomalies,
+    diagnosticHypotheses,
+    recommendations,
+    auditWarnings,
+  } = useAudit();
 
   // Redirect if no analysis data exists (page reload)
   useEffect(() => {
@@ -29,7 +38,11 @@ export default function ResultsDashboard() {
   if (!analysisResults) return null;
 
   const benchmark = getBenchmarkForType(buildingInfo.buildingType);
-  const percentile = calculateEUIPercentile(analysisResults.siteEUI, buildingInfo.buildingType);
+  const percentile = peerInsights?.percentile ?? analysisResults.peerPercentile ?? 50;
+  const peerLabel = peerInsights?.archetype_label ?? analysisResults.clusterLabel ?? benchmark.label;
+  const climateZone = peerInsights?.climate_zone ?? analysisResults.climateZone ?? "Unassigned";
+  const topRecommendations = recommendations.slice(0, 3);
+  const flaggedAnomalies = anomalies.filter((signal) => signal.flagged);
   // Prepare chart data
   const chartData = analysisResults.monthlyBreakdown.map((m) => ({
     name: m.month.split("-")[1], // Just the month number or short name
@@ -49,7 +62,7 @@ export default function ResultsDashboard() {
             <h1 className="text-3xl font-heading font-bold">{buildingInfo.address}</h1>
             <div className="flex items-center gap-3 mt-2 text-sm text-[var(--text-muted)]">
               <span className="px-2 py-1 glass rounded text-[var(--text-primary)] font-medium">
-                {benchmark.label}
+                {peerLabel}
               </span>
               <span>{buildingInfo.squareFeet.toLocaleString()} sq ft</span>
               <span>Built {buildingInfo.yearBuilt}</span>
@@ -210,9 +223,49 @@ export default function ResultsDashboard() {
                     </span>
                   </div>
                 </li>
+                <li className="flex gap-3 items-start">
+                  <div className="bg-[var(--bg-tertiary)] p-1.5 rounded text-[var(--text-muted)]">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="block text-sm font-medium">Flagged Months</span>
+                    <span className="block text-xs text-[var(--text-secondary)]">
+                      {flaggedAnomalies.length > 0
+                        ? flaggedAnomalies.map((signal) => signal.month).join(", ")
+                        : "No anomalous utility months detected"}
+                    </span>
+                  </div>
+                </li>
               </ul>
             </GlassCard>
           </div>
+
+          <GlassCard className="p-6">
+            <div className="flex justify-between items-center mb-4 gap-4">
+              <h3 className="text-lg font-heading font-medium">Diagnostic Findings</h3>
+              <span className="text-xs text-[var(--text-muted)]">
+                {diagnosticHypotheses.length} hypotheses, {recommendations.length} ECMs
+              </span>
+            </div>
+            <div className="space-y-4">
+              {diagnosticHypotheses.length > 0 ? (
+                diagnosticHypotheses.slice(0, 4).map((hypothesis) => (
+                  <div key={hypothesis.hypothesis_id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                    <div className="flex justify-between gap-4 mb-2">
+                      <h4 className="font-medium text-sm">{hypothesis.title}</h4>
+                      <span className="text-xs text-[var(--text-muted)]">Confidence {hypothesis.confidence}/5</span>
+                    </div>
+                    <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{hypothesis.description}</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-2">
+                      Evidence: {hypothesis.evidence_months.join(", ") || "None"}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-[var(--text-secondary)]">No diagnostic findings were generated for this run.</p>
+              )}
+            </div>
+          </GlassCard>
         </div>
 
         {/* RIGHT COLUMN */}
@@ -235,8 +288,10 @@ export default function ResultsDashboard() {
                 <span className="font-bold">{analysisResults.siteEUI.toFixed(1)}</span>
               </div>
               <div className="flex justify-between text-sm border-t border-[var(--border-subtle)] pt-2 relative">
-                <span className="text-[var(--text-muted)]">Median {benchmark.label}</span>
-                <span className="font-medium text-[var(--text-muted)]">{benchmark.medianSiteEUI.toFixed(1)}</span>
+                <span className="text-[var(--text-muted)]">Median {peerLabel}</span>
+                <span className="font-medium text-[var(--text-muted)]">
+                  {(peerInsights?.median_eui ?? benchmark.medianSiteEUI).toFixed(1)}
+                </span>
               </div>
             </div>
             
@@ -281,10 +336,59 @@ export default function ResultsDashboard() {
               <div className="absolute inset-0 ring-1 ring-inset ring-white/10 pointer-events-none rounded-2xl" />
               <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/80 to-transparent p-4 pt-12">
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  <Leaf className="w-4 h-4 text-green-400" /> Climate Zone: 4A (Mixed-Humid)
+                  <Leaf className="w-4 h-4 text-green-400" /> Climate Zone: {climateZone}
                 </div>
               </div>
           </GlassCard>
+
+          <GlassCard className="p-6">
+            <div className="flex justify-between items-center mb-4 gap-4">
+              <h3 className="text-lg font-heading font-medium">Top ECMs</h3>
+              <span className="text-xs text-[var(--text-muted)]">Tool-backed payback and NPV</span>
+            </div>
+            <div className="space-y-4">
+              {topRecommendations.length > 0 ? (
+                topRecommendations.map((recommendation) => (
+                  <div key={recommendation.recommendation_id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                    <div className="flex justify-between gap-4">
+                      <h4 className="font-medium text-sm">{recommendation.title}</h4>
+                      <span className="text-xs text-[var(--text-muted)]">{recommendation.implementation_complexity}</span>
+                    </div>
+                    <p className="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">{recommendation.description}</p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
+                      <span className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1">
+                        Savings ${recommendation.estimated_savings_usd.toLocaleString()}
+                      </span>
+                      <span className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1">
+                        Payback {recommendation.simple_payback_years?.toFixed(1) ?? "n/a"} yrs
+                      </span>
+                      <span className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1">
+                        NPV ${recommendation.npv_10y.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-[var(--text-secondary)]">Recommendations will appear after the reasoning stage completes.</p>
+              )}
+            </div>
+          </GlassCard>
+
+          {auditWarnings.length > 0 && (
+            <GlassCard className="p-6 border-amber-500/40">
+              <div className="flex items-center gap-2 mb-3 text-amber-300">
+                <AlertTriangle className="w-4 h-4" />
+                <h3 className="text-lg font-heading font-medium">Audit Warnings</h3>
+              </div>
+              <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+                {auditWarnings.map((warning) => (
+                  <li key={warning} className="leading-relaxed">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
+            </GlassCard>
+          )}
 
           {/* CTA Link */}
           {reportMarkdown && (
@@ -295,9 +399,9 @@ export default function ResultsDashboard() {
                 <Link href="/report" className="w-full glass p-6 flex items-center justify-between group cursor-pointer hover:border-[var(--accent-green)] transition-colors">
                   <div>
                     <h3 className="font-heading font-semibold text-lg text-[var(--accent-green)] group-hover:drop-shadow-[0_0_8px_rgba(0,229,134,0.5)] transition-all">
-                      Read LLM Diagnostic Report
+                      Read Structured Audit Report
                     </h3>
-                    <p className="text-xs text-[var(--text-muted)] mt-1">Generated by Claude/Gemini PE Agent</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Generated by the AuditAI reasoning pipeline</p>
                   </div>
                   <div className="bg-[var(--accent-green-dim)] p-3 rounded-full text-[var(--accent-green)] group-hover:bg-[var(--accent-green)] group-hover:text-black transition-colors">
                     <FileText className="w-5 h-5" />

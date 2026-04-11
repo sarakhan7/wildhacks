@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.venv/
+
+# backend runtime artifacts
+/backend/data/auditai.db
+/backend/data/uploads/
 
 # vercel
 .vercel

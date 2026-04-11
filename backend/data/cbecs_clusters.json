@@ -1,0 +1,36 @@
+{
+  "clusters": [
+    {
+      "cluster_id": "office-cool",
+      "cluster_label": "Office peer cluster",
+      "archetype_label": "Older Office, Mixed-Humid",
+      "centroid": [62.0, 85000.0, 1988.0, 60.0, 88.0],
+      "scale": [35.0, 60000.0, 25.0, 25.0, 25.0],
+      "eui_percentiles": { "p25": 35.0, "p50": 54.0, "p75": 82.0 }
+    },
+    {
+      "cluster_id": "retail-mid",
+      "cluster_label": "Retail peer cluster",
+      "archetype_label": "Mid-Size Retail, Mixed-Humid",
+      "centroid": [58.0, 45000.0, 1998.0, 75.0, 75.0],
+      "scale": [30.0, 40000.0, 20.0, 20.0, 25.0],
+      "eui_percentiles": { "p25": 28.0, "p50": 51.9, "p75": 80.0 }
+    },
+    {
+      "cluster_id": "multifamily-core",
+      "cluster_label": "Multifamily peer cluster",
+      "archetype_label": "Multifamily, Temperate",
+      "centroid": [56.0, 120000.0, 1978.0, 168.0, 95.0],
+      "scale": [28.0, 100000.0, 30.0, 40.0, 10.0],
+      "eui_percentiles": { "p25": 32.0, "p50": 53.8, "p75": 78.0 }
+    },
+    {
+      "cluster_id": "institutional-high",
+      "cluster_label": "Institutional peer cluster",
+      "archetype_label": "Institutional, High-Load",
+      "centroid": [150.0, 160000.0, 1995.0, 120.0, 90.0],
+      "scale": [80.0, 150000.0, 25.0, 35.0, 20.0],
+      "eui_percentiles": { "p25": 100.0, "p50": 168.3, "p75": 230.0 }
+    }
+  ]
+}

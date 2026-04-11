@@ -1,0 +1,11 @@
+{
+  "benchmarks": [
+    { "type": "office", "label": "Office", "median_site_eui": 54.0, "top_quartile_eui": 32.0, "bottom_quartile_eui": 82.0 },
+    { "type": "retail", "label": "Retail Store", "median_site_eui": 51.9, "top_quartile_eui": 28.0, "bottom_quartile_eui": 80.0 },
+    { "type": "multifamily", "label": "Multifamily Housing", "median_site_eui": 53.8, "top_quartile_eui": 32.0, "bottom_quartile_eui": 78.0 },
+    { "type": "hospital", "label": "Hospital", "median_site_eui": 168.3, "top_quartile_eui": 120.0, "bottom_quartile_eui": 230.0 },
+    { "type": "k12_school", "label": "K-12 School", "median_site_eui": 45.2, "top_quartile_eui": 28.0, "bottom_quartile_eui": 65.0 },
+    { "type": "warehouse", "label": "Warehouse / Storage", "median_site_eui": 20.6, "top_quartile_eui": 10.0, "bottom_quartile_eui": 35.0 },
+    { "type": "other", "label": "Other", "median_site_eui": 62.0, "top_quartile_eui": 35.0, "bottom_quartile_eui": 95.0 }
+  ]
+}

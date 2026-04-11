@@ -69,7 +69,7 @@ export default function ReportViewer() {
           </p>
           <div className="mt-4 flex items-center justify-center gap-4 text-xs font-medium text-[var(--text-muted)] print:text-gray-500">
             <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-[var(--accent-green)] print:text-green-600"/> Deterministic Statistics</span>
-            <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-[var(--accent-green)] print:text-green-600"/> AI Evaluated</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-[var(--accent-green)] print:text-green-600"/> Structured Reasoning</span>
             <span>Date: {new Date().toLocaleDateString()}</span>
           </div>
         </div>

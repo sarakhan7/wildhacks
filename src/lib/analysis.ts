@@ -3,6 +3,8 @@
  * All numeric reasoning is deterministic (no LLM).
  */
 
+import { getBenchmarkForType } from "./benchmarks";
+
 export interface UtilityReading {
   month: string;          // "2024-01", "2024-02", etc.
   kwh: number;            // electricity consumption
@@ -45,6 +47,18 @@ export interface AnalysisResults {
   coolingPercent: number;      // % of energy likely cooling
   baseloadPercent: number;     // % of energy always-on equipment
   annualSavingsOpportunity: number; // estimated $ savings if brought to median
+  peerPercentile?: number;
+  clusterLabel?: string;
+  climateZone?: string;
+  anomalyCount?: number;
+  prism?: {
+    base_temperature_f: number;
+    r_squared: number;
+    baseload_kbtu_per_month: number;
+    heating_slope_kbtu_per_hdd: number;
+    cooling_slope_kbtu_per_cdd: number;
+    modeled_months: string[];
+  };
 }
 
 export interface MonthlyBreakdown {
@@ -131,8 +145,6 @@ export function runAnalysis(readings: UtilityReading[], building: BuildingInfo):
 
   // Estimate baseload (minimum monthly consumption ≈ always-on equipment)
   const estimatedBaseload = Math.min(...monthlyBreakdown.map(m => m.totalKbtu));
-  const totalMonthlyAvg = totalEnergy / Math.max(monthlyBreakdown.length, 1);
-
   // Simplified heating/cooling/baseload split
   // Baseload = minimum monthly usage
   // Heating months = those above baseload in cold season (Oct-Mar)
@@ -172,7 +184,6 @@ export function runAnalysis(readings: UtilityReading[], building: BuildingInfo):
   }
 
   // Estimated savings if brought to median
-  const { getBenchmarkForType } = require("./benchmarks");
   const benchmark = getBenchmarkForType(building.buildingType);
   let annualSavingsOpportunity = 0;
   if (siteEUI > benchmark.medianSiteEUI) {

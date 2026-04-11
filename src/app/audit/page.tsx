@@ -11,12 +11,13 @@ import { StepWizard } from "@/components/ui/StepWizard";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { FileUpload } from "@/components/ui/FileUpload";
 import { LoadingPipeline } from "@/components/ui/LoadingPipeline";
+import type { AuditResultsBundle, AuditStatus } from "@/lib/audit-api";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
 export default function AuditWizard() {
   const router = useRouter();
-  const { buildingInfo, setBuildingInfo, setUtilityReadings, setAnalysisResults, setReportMarkdown } = useAudit();
+  const { buildingInfo, setBuildingInfo, setAuditResults, setAuditId } = useAudit();
   
   const [activeStep, setActiveStep] = useState(0);
   const [addressSearch, setAddressSearch] = useState("");
@@ -24,8 +25,24 @@ export default function AuditWizard() {
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [analysisStage, setAnalysisStage] = useState(0);
+  const [analysisError, setAnalysisError] = useState("");
 
   const steps = ["Location", "Details", "Systems", "Data"];
+
+  const stageToIndex: Record<AuditStatus["stage"], number> = {
+    created: 0,
+    queued: 0,
+    ocr: 1,
+    normalize: 1,
+    weather: 2,
+    analytics: 2,
+    diagnostics: 3,
+    recommendations: 3,
+    report: 3,
+    completed: 4,
+    needs_review: 4,
+    failed: 4,
+  };
 
   // Step 1: Location geocoding handler
   const handleGeocode = async (e: React.FormEvent) => {
@@ -68,63 +85,69 @@ export default function AuditWizard() {
 
     setIsSubmitting(true);
     setAnalysisStage(0);
-
-    const formData = new FormData();
-    formData.append("buildingInfo", JSON.stringify(buildingInfo));
-    files.forEach(f => formData.append("files", f));
+    setAnalysisError("");
 
     try {
-      // Stage 1: Document extraction
-      setAnalysisStage(1); 
-      
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error("Analysis failed");
-      const data = await res.json();
-      
-      setUtilityReadings(data.readings);
-      setAnalysisResults(data.analysis);
-
-      // Stage 2: Peer Benchmarking (done locally fast)
-      setAnalysisStage(2);
-      
-      // Stage 3: LLM Engineering Report
-      setAnalysisStage(3);
-      
-      const { calculateEUIPercentile, getPerformanceRating, getBenchmarkForType } = await import("@/lib/benchmarks");
-      const percentile = calculateEUIPercentile(data.analysis.siteEUI, buildingInfo.buildingType);
-      const rating = getPerformanceRating(percentile);
-      const benchmark = getBenchmarkForType(buildingInfo.buildingType);
-
-      const reportContext = {
-        building: {
-          ...buildingInfo,
-          typeLabel: benchmark.label
-        },
-        analysis: data.analysis,
-        benchmark: benchmark,
-        percentile,
-        grade: rating.grade,
-        ecms: data.ecms
-      };
-
-      const reportRes = await fetch("/api/report", {
+      const createRes = await fetch("/api/audits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reportContext),
+        body: JSON.stringify({ building: buildingInfo }),
       });
-
-      if (reportRes.ok) {
-        const reportData = await reportRes.json();
-        setReportMarkdown(reportData.report);
-      } else {
-        // If report fails, keep going to results anyway, just without markdown report
-        console.error("Report generation failed");
+      const createData = await createRes.json();
+      if (!createRes.ok) {
+        throw new Error(createData.error || createData.detail || "Failed to create audit");
       }
 
+      const auditId = createData.audit_id as string;
+      setAuditId(auditId);
+
+      if (files.length > 0) {
+        const uploadFormData = new FormData();
+        files.forEach((file) => uploadFormData.append("files", file));
+        setAnalysisStage(1);
+        const uploadRes = await fetch(`/api/audits/${auditId}/files`, {
+          method: "POST",
+          body: uploadFormData,
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) {
+          throw new Error(uploadData.error || uploadData.detail || "Failed to upload utility files");
+        }
+      }
+
+      const runRes = await fetch(`/api/audits/${auditId}/run`, { method: "POST" });
+      const runData = await runRes.json();
+      if (!runRes.ok) {
+        throw new Error(runData.error || runData.detail || "Failed to queue audit");
+      }
+
+      let status: AuditStatus | null = null;
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const statusRes = await fetch(`/api/audits/${auditId}/status`, { cache: "no-store" });
+        const statusData = (await statusRes.json()) as AuditStatus & { detail?: string };
+        if (!statusRes.ok) {
+          throw new Error(statusData.detail || "Failed to fetch audit status");
+        }
+        status = statusData;
+        setAnalysisStage(stageToIndex[status.stage]);
+
+        if (status.status === "failed") {
+          throw new Error(status.error || "Audit analysis failed");
+        }
+
+        if (status.status === "completed" || status.status === "needs_review") {
+          break;
+        }
+      }
+
+      const resultsRes = await fetch(`/api/audits/${auditId}/results`, { cache: "no-store" });
+      const resultsData = await resultsRes.json();
+      if (!resultsRes.ok) {
+        throw new Error(resultsData.error || resultsData.detail || "Failed to fetch audit results");
+      }
+
+      setAuditResults(resultsData as AuditResultsBundle);
       setAnalysisStage(4);
       setTimeout(() => {
         router.push("/results");
@@ -132,7 +155,9 @@ export default function AuditWizard() {
 
     } catch (error) {
       console.error(error);
-      alert("Analysis failed. Please try again or check console logs.");
+      const message = error instanceof Error ? error.message : "Analysis failed";
+      setAnalysisError(message);
+      alert(`${message}. Make sure the Python backend is running and try again.`);
       setIsSubmitting(false);
     }
   };
@@ -152,6 +177,10 @@ export default function AuditWizard() {
             <h2 className="text-3xl font-heading font-bold mb-2">Analyzing Facility</h2>
             <p className="text-[var(--text-muted)]">Our multi-agent pipeline is processing your data.</p>
           </motion.div>
+
+          {analysisError && (
+            <p className="mb-6 text-sm text-red-300">{analysisError}</p>
+          )}
           
           <div className="mt-12 text-left">
             <LoadingPipeline 

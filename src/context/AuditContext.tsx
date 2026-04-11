@@ -2,6 +2,16 @@
 
 import React, { createContext, useContext, useState, ReactNode } from "react";
 import { AnalysisResults, BuildingInfo, UtilityReading } from "../lib/analysis";
+import {
+  AuditResultsBundle,
+  DiagnosticHypothesis,
+  ECMRecommendation,
+  FinancialProjection,
+  PeerClusterAssignment,
+  WeatherMonthFeature,
+} from "@/lib/audit-api";
+
+type AuditAnomaly = AuditResultsBundle["anomalies"][number];
 
 type Step = "location" | "details" | "systems" | "upload" | "analyzing" | "complete";
 
@@ -22,6 +32,18 @@ interface AuditContextType {
   
   reportMarkdown: string | null;
   setReportMarkdown: (markdown: string | null) => void;
+
+  auditId: string | null;
+  setAuditId: (auditId: string | null) => void;
+
+  peerInsights: PeerClusterAssignment | null;
+  anomalies: AuditAnomaly[];
+  diagnosticHypotheses: DiagnosticHypothesis[];
+  recommendations: ECMRecommendation[];
+  financialProjections: FinancialProjection[];
+  weatherFeatures: WeatherMonthFeature[];
+  auditWarnings: string[];
+  setAuditResults: (results: AuditResultsBundle) => void;
   
   // Helpers
   resetAudit: () => void;
@@ -50,9 +72,31 @@ export function AuditProvider({ children }: { children: ReactNode }) {
   const [utilityReadings, setUtilityReadings] = useState<UtilityReading[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResults | null>(null);
   const [reportMarkdown, setReportMarkdown] = useState<string | null>(null);
+  const [auditId, setAuditId] = useState<string | null>(null);
+  const [peerInsights, setPeerInsights] = useState<PeerClusterAssignment | null>(null);
+  const [anomalies, setAnomalies] = useState<AuditAnomaly[]>([]);
+  const [diagnosticHypotheses, setDiagnosticHypotheses] = useState<DiagnosticHypothesis[]>([]);
+  const [recommendations, setRecommendations] = useState<ECMRecommendation[]>([]);
+  const [financialProjections, setFinancialProjections] = useState<FinancialProjection[]>([]);
+  const [weatherFeatures, setWeatherFeatures] = useState<WeatherMonthFeature[]>([]);
+  const [auditWarnings, setAuditWarnings] = useState<string[]>([]);
 
   const setBuildingInfo = (info: Partial<BuildingInfo>) => {
     setBuildingInfoState(prev => ({ ...prev, ...info }));
+  };
+
+  const setAuditResults = (results: AuditResultsBundle) => {
+    setAuditId(results.audit_id);
+    setUtilityReadings(results.readings);
+    setAnalysisResults(results.analysis);
+    setReportMarkdown(results.report?.markdown || null);
+    setPeerInsights(results.peer);
+    setAnomalies(results.anomalies);
+    setDiagnosticHypotheses(results.diagnostics);
+    setRecommendations(results.recommendations);
+    setFinancialProjections(results.financials);
+    setWeatherFeatures(results.weather);
+    setAuditWarnings(results.warnings);
   };
 
   const resetAudit = () => {
@@ -61,6 +105,14 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     setUtilityReadings([]);
     setAnalysisResults(null);
     setReportMarkdown(null);
+    setAuditId(null);
+    setPeerInsights(null);
+    setAnomalies([]);
+    setDiagnosticHypotheses([]);
+    setRecommendations([]);
+    setFinancialProjections([]);
+    setWeatherFeatures([]);
+    setAuditWarnings([]);
   };
 
   return (
@@ -76,6 +128,16 @@ export function AuditProvider({ children }: { children: ReactNode }) {
         setAnalysisResults,
         reportMarkdown,
         setReportMarkdown,
+        auditId,
+        setAuditId,
+        peerInsights,
+        anomalies,
+        diagnosticHypotheses,
+        recommendations,
+        financialProjections,
+        weatherFeatures,
+        auditWarnings,
+        setAuditResults,
         resetAudit,
       }}
     >
