@@ -121,7 +121,7 @@ async function fetchMapboxFeatures(query: string, token: string) {
   const suggestionData = (await suggestionRes.json()) as { suggestions?: SearchSuggestion[] };
   const suggestions = Array.isArray(suggestionData.suggestions) ? suggestionData.suggestions : [];
 
-  const retrievedFeatures = await Promise.all(
+  const retrievedFeatures: Array<LocationFeature | null> = await Promise.all(
     suggestions.map(async (suggestion) => {
       const retrieveUrl = new URL(
         `https://api.mapbox.com/search/searchbox/v1/retrieve/${encodeURIComponent(suggestion.mapbox_id)}`
@@ -199,8 +199,7 @@ async function fetchNominatimFeatures(query: string) {
     return [];
   }
 
-  return data
-    .map((result) => {
+  const features: Array<LocationFeature | null> = data.map((result) => {
       const lon = Number(result.lon);
       const lat = Number(result.lat);
       if (Number.isNaN(lon) || Number.isNaN(lat)) {
@@ -217,8 +216,9 @@ async function fetchNominatimFeatures(query: string) {
         center: [lon, lat] as [number, number],
         source: "nominatim" as const,
       };
-    })
-    .filter((feature): feature is LocationFeature => feature !== null);
+    });
+
+  return features.filter((feature): feature is LocationFeature => feature !== null);
 }
 
 export async function GET(request: Request) {
