@@ -68,7 +68,9 @@ class AuditPipeline:
 
             self.repository.update_status(audit_id, status="running", stage="analytics", progress=60, warnings=warnings)
             anomalies = detect_anomalies(normalized, weather)
-            anomaly_months = {signal.month for signal in anomalies if signal.flagged}
+            anomaly_months = set()
+            if self._should_exclude_anomalies_from_prism(normalized):
+                anomaly_months = {signal.month for signal in anomalies if signal.flagged}
             prism = fit_prism_model(normalized, weather, anomaly_months)
             peer = self.peer_service.assign(building, self._compute_site_eui(normalized, building), self.weather_service.derive_climate_zone(building))
             analysis = self._build_analysis(building, normalized, prism, anomalies, peer)
@@ -165,7 +167,7 @@ class AuditPipeline:
             is_winter = month_num in {1, 2, 3, 11, 12}
             months.append(
                 NormalizedUtilityReading(
-                    month=f"2024-{month_num:02d}",
+                    month=f"2025-{month_num:02d}",
                     kwh=9000 + (3200 if is_summer else 0),
                     therms=120 + (280 if is_winter else 0),
                     peak_kw=18 + (4 if is_summer else 0),
@@ -176,6 +178,14 @@ class AuditPipeline:
                 )
             )
         return months
+
+    def _should_exclude_anomalies_from_prism(self, readings: list[NormalizedUtilityReading]) -> bool:
+        # Keep anomaly detection/reporting for demo runs, but avoid removing the synthetic
+        # seasonal months from PRISM because the generated dataset is intentionally stylized.
+        return not all(
+            not reading.source_document_ids and "Generated demo reading" in reading.warnings
+            for reading in readings
+        )
 
     def _compute_site_eui(self, readings: list[NormalizedUtilityReading], building: BuildingProfile) -> float:
         total_energy = sum((reading.kwh * KWH_TO_KBTU) + (reading.therms * THERMS_TO_KBTU) for reading in readings)
