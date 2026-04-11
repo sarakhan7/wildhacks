@@ -13,6 +13,7 @@ from .repository import AuditRepository
 from .schemas import CreateAuditRequest, CreateAuditResponse, ReviewReadingsRequest
 from .services.ocr import OCRService
 from .services.reasoning import ReasoningService
+from .storage import DocumentStorageService
 from .services.weather import WeatherService
 
 
@@ -21,7 +22,14 @@ conn = connect(settings.database_path)
 settings.database_path.parent.mkdir(parents=True, exist_ok=True)
 init_db(conn)
 
-repository = AuditRepository(conn, settings.upload_dir)
+storage_service = DocumentStorageService(
+    upload_dir=settings.upload_dir,
+    supabase_url=settings.supabase_url,
+    supabase_publishable_key=settings.supabase_publishable_key,
+    supabase_service_role_key=settings.supabase_service_role_key,
+    supabase_storage_bucket=settings.supabase_storage_bucket,
+)
+repository = AuditRepository(conn, settings.upload_dir, storage_service)
 queue = AuditJobQueue(settings.max_workers)
 pipeline = AuditPipeline(
     repository=repository,

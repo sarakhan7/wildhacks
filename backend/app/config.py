@@ -46,6 +46,13 @@ class Settings:
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     noaa_api_token: str = os.getenv("NOAA_API_TOKEN", "")
     solar_api_key: str = os.getenv("GOOGLE_SOLAR_API_KEY", "")
+    supabase_url: str = os.getenv("SUPABASE_URL", os.getenv("NEXT_PUBLIC_SUPABASE_URL", ""))
+    supabase_publishable_key: str = os.getenv(
+        "SUPABASE_PUBLISHABLE_KEY",
+        os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", ""),
+    )
+    supabase_service_role_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    supabase_storage_bucket: str = os.getenv("SUPABASE_STORAGE_BUCKET", "audit-documents")
     default_reasoning_provider: str = os.getenv("AUDITAI_REASONING_PROVIDER", "gemini")
     ocr_model: str = os.getenv("AUDITAI_OCR_MODEL", "gemini-2.0-flash")
     reasoning_model: str = os.getenv("AUDITAI_REASONING_MODEL", "gemini-2.0-flash")

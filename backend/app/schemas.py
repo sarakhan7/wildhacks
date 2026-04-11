@@ -56,6 +56,11 @@ class UploadedDocument(BaseModel):
     filename: str
     mime_type: str
     storage_path: str
+    storage_provider: str = "local"
+    storage_bucket: str | None = None
+    storage_object_path: str | None = None
+    storage_url: str | None = None
+    upload_warnings: list[str] = Field(default_factory=list)
     created_at: datetime
 
 

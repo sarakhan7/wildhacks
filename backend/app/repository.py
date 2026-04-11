@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -24,6 +23,7 @@ from .schemas import (
     UploadedDocument,
     WeatherMonthFeature,
 )
+from .storage import DocumentStorageService
 
 
 def now_iso() -> str:
@@ -31,10 +31,11 @@ def now_iso() -> str:
 
 
 class AuditRepository:
-    def __init__(self, conn: sqlite3.Connection, upload_dir: Path) -> None:
+    def __init__(self, conn: sqlite3.Connection, upload_dir: Path, storage_service: DocumentStorageService) -> None:
         self.conn = conn
         self.upload_dir = upload_dir
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        self.storage_service = storage_service
 
     def _insert_many_json(self, table: str, key_name: str, audit_id: str, rows: list[dict[str, Any]], created_at: str) -> None:
         self.conn.execute(f"DELETE FROM {table} WHERE audit_id = ?", (audit_id,))
@@ -69,16 +70,24 @@ class AuditRepository:
     def save_document(self, audit_id: str, filename: str, mime_type: str, source_path: Path) -> UploadedDocument:
         document_id = str(uuid.uuid4())
         created_at = datetime.now(UTC)
-        destination_dir = self.upload_dir / audit_id
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        destination = destination_dir / f"{document_id}-{filename}"
-        shutil.copy2(source_path, destination)
+        stored = self.storage_service.store_bytes(
+            audit_id=audit_id,
+            document_id=document_id,
+            filename=filename,
+            mime_type=mime_type,
+            content=source_path.read_bytes(),
+        )
         payload = {
             "document_id": document_id,
             "audit_id": audit_id,
             "filename": filename,
             "mime_type": mime_type,
-            "storage_path": str(destination),
+            "storage_path": str(stored.local_path),
+            "storage_provider": stored.storage_provider,
+            "storage_bucket": stored.storage_bucket,
+            "storage_object_path": stored.storage_object_path,
+            "storage_url": stored.storage_url,
+            "upload_warnings": stored.warnings,
             "created_at": created_at.isoformat(),
         }
         self.conn.execute(
@@ -87,7 +96,7 @@ class AuditRepository:
               document_id, audit_id, filename, mime_type, storage_path, payload_json, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (document_id, audit_id, filename, mime_type, str(destination), json.dumps(payload), created_at.isoformat()),
+            (document_id, audit_id, filename, mime_type, str(stored.local_path), json.dumps(payload), created_at.isoformat()),
         )
         self.conn.commit()
         return UploadedDocument.model_validate(payload)
@@ -95,16 +104,24 @@ class AuditRepository:
     def save_uploaded_bytes(self, audit_id: str, filename: str, mime_type: str, content: bytes) -> UploadedDocument:
         document_id = str(uuid.uuid4())
         created_at = datetime.now(UTC)
-        destination_dir = self.upload_dir / audit_id
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        destination = destination_dir / f"{document_id}-{filename}"
-        destination.write_bytes(content)
+        stored = self.storage_service.store_bytes(
+            audit_id=audit_id,
+            document_id=document_id,
+            filename=filename,
+            mime_type=mime_type,
+            content=content,
+        )
         payload = {
             "document_id": document_id,
             "audit_id": audit_id,
             "filename": filename,
             "mime_type": mime_type,
-            "storage_path": str(destination),
+            "storage_path": str(stored.local_path),
+            "storage_provider": stored.storage_provider,
+            "storage_bucket": stored.storage_bucket,
+            "storage_object_path": stored.storage_object_path,
+            "storage_url": stored.storage_url,
+            "upload_warnings": stored.warnings,
             "created_at": created_at.isoformat(),
         }
         self.conn.execute(
@@ -113,7 +130,7 @@ class AuditRepository:
               document_id, audit_id, filename, mime_type, storage_path, payload_json, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (document_id, audit_id, filename, mime_type, str(destination), json.dumps(payload), created_at.isoformat()),
+            (document_id, audit_id, filename, mime_type, str(stored.local_path), json.dumps(payload), created_at.isoformat()),
         )
         self.conn.commit()
         return UploadedDocument.model_validate(payload)
