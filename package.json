@@ -12,14 +12,18 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@types/three": "^0.183.1",
     "framer-motion": "^12.38.0",
+    "geotiff": "^3.0.5",
     "lucide-react": "^1.8.0",
     "mapbox-gl": "^3.21.0",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-map-gl": "^8.1.1",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "three": "^0.183.2",
+    "three-mesh-bvh": "^0.9.9"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

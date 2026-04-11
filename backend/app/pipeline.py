@@ -91,7 +91,7 @@ class AuditPipeline:
                 warnings=warnings,
                 metadata={"anomalies": [signal.model_dump() for signal in anomalies]},
             )
-            hypotheses = self.reasoning_service.diagnose(building, analysis, peer)
+            hypotheses = self.reasoning_service.diagnose(building, analysis, peer, anomalies)
             self.repository.save_hypotheses(audit_id, hypotheses)
 
             self.repository.update_status(
@@ -102,7 +102,7 @@ class AuditPipeline:
                 warnings=warnings,
                 metadata={"anomalies": [signal.model_dump() for signal in anomalies]},
             )
-            recommendations, financials = self.reasoning_service.recommend(building, analysis, peer, hypotheses)
+            recommendations, financials = self.reasoning_service.recommend(building, analysis, peer, hypotheses, anomalies)
             self.repository.save_recommendations(audit_id, recommendations)
             self.repository.save_financials(audit_id, financials)
 
@@ -114,7 +114,15 @@ class AuditPipeline:
                 warnings=warnings,
                 metadata={"anomalies": [signal.model_dump() for signal in anomalies]},
             )
-            report = self.reasoning_service.write_report(building, analysis, peer, hypotheses, recommendations, financials)
+            report = self.reasoning_service.write_report(
+                building,
+                analysis,
+                peer,
+                anomalies,
+                hypotheses,
+                recommendations,
+                financials,
+            )
             self.repository.save_report(audit_id, report)
 
             needs_review = any(reading.confidence < 0.55 for reading in normalized)
