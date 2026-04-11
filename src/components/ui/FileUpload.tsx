@@ -63,10 +63,10 @@ export function FileUpload({
   };
 
   return (
-    <div className={`w-full \${className}`}>
+    <div className={`w-full ${className}`}>
       <div 
         className={`relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center transition-all 
-          \${dragActive ? 'border-[var(--accent-green)] bg-[var(--accent-green-dim)]' : 'border-[var(--border-subtle)] hover:border-[var(--accent-cyan-dim)] hover:bg-[rgba(255,255,255,0.02)]'}
+          ${dragActive ? 'border-[var(--accent-green)] bg-[var(--accent-green-dim)]' : 'border-[var(--border-subtle)] hover:border-[var(--accent-cyan-dim)] hover:bg-[rgba(255,255,255,0.02)]'}
         `}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -108,7 +108,10 @@ export function FileUpload({
           </div>
           <div className="space-y-2 max-h-[240px] overflow-y-auto pr-2">
             {selectedFiles.map((f, idx) => (
-              <div key={`\${f.name}-\${idx}`} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+              <div
+                key={`${f.name}-${f.lastModified}-${idx}`}
+                className="flex items-center justify-between p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
+              >
                 <div className="flex items-center gap-3 overflow-hidden">
                   <FileText className="w-5 h-5 text-[var(--text-muted)] flex-shrink-0" />
                   <span className="text-sm truncate text-[#e2e8f0]">{f.name}</span>
