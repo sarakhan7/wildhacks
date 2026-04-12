@@ -46,3 +46,9 @@ __pycache__/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# mock data and recordings
+/gemini_recordings/
+/weather_recordings/
+/backend/data/*.csv
+/backend/data/*.json

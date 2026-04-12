@@ -150,9 +150,12 @@ If you deploy from your own fork (for example DigitalOcean only sees your repos)
 
    If `upstream` already exists, use `git remote set-url upstream https://github.com/sarakhan7/wildhacks.git` instead of `add`.
 
-3. **GitHub Actions** (`.github/workflows/sync-upstream.yml`): merges **`upstream/main`** into **`main`** on your fork, then pushes to **`origin`**. It runs **every hour** (at minute 0 UTC; GitHub may delay runs slightly under load) and on **manual** “Run workflow” from the Actions tab. The job is **skipped** on `sarakhan7/wildhacks` itself so the canonical repo is not affected if this file is merged there.
-4. On a fork, GitHub may **disable scheduled workflows** until you enable Actions for the repository (Settings → Actions → General). **Workflow dispatch** still works for a manual sync anytime.
-5. If upstream changes conflict with commits only on your fork, the workflow run will fail until you resolve conflicts locally, merge or rebase, and push.
+3. **Manual Sync**: If you want to pull the latest changes from upstream:
+   ```bash
+   git fetch upstream
+   git merge upstream/main
+   ```
+   Resolve any conflicts, then `git push origin main`.
 
 ## Learn more
 
