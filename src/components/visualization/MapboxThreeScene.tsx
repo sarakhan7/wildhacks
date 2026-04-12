@@ -312,53 +312,26 @@ function resolveFootprints(
 ): { parts: BuildingPart[]; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null {
   try {
     const point = map.project([data.building.lng, data.building.lat]);
-    const sourceBounds = expandGeoBounds(data.solar.renderBounds, 0.02);
-    const sourceFeatures = map.querySourceFeatures("composite", {
-      sourceLayer: "building",
-    });
-    const renderedFallback =
-      sourceFeatures.length === 0
-        ? map.queryRenderedFeatures(
-            [[point.x - 160, point.y - 160], [point.x + 160, point.y + 160]],
-            { layers: ["visualization-context-buildings"] },
-          )
-        : [];
+    const rendered = map.queryRenderedFeatures(
+      [[point.x - 120, point.y - 120], [point.x + 120, point.y + 120]],
+      { layers: ["visualization-context-buildings"] },
+    );
 
-    const dedupedRings = new Map<string, { ring: [number, number][]; height: number }>();
-    [...sourceFeatures, ...renderedFallback].forEach((f) => {
-      if (String(f.properties?.extrude ?? "") !== "true") {
-        return;
-      }
+    const allRings: Array<{ ring: [number, number][]; height: number }> = [];
+    rendered.forEach((f) => {
       const parsedHeight = Number(f.properties?.height ?? NaN);
       const parsedBase = Number(f.properties?.min_height ?? 0);
       const h = Number.isFinite(parsedHeight)
         ? Math.max(0, parsedHeight - parsedBase)
         : data.building.inferredHeightMeters;
-      const maybeAddRing = (ring: [number, number][]) => {
-        if (!ring || ring.length < 3) {
-          return;
-        }
-        if (
-          !ringMatchesGeoBounds(ring, sourceBounds) &&
-          distanceToCenter(ring, data.building.lng, data.building.lat) > 0.0017
-        ) {
-          return;
-        }
-        const centroid = centroidOfRing(ring);
-        const key = `${centroid.lng.toFixed(6)}:${centroid.lat.toFixed(6)}:${h.toFixed(1)}`;
-        if (!dedupedRings.has(key)) {
-          dedupedRings.set(key, { ring, height: h });
-        }
-      };
-
       if (f.geometry && f.geometry.type === "Polygon") {
-        maybeAddRing(f.geometry.coordinates[0] as [number, number][]);
+        allRings.push({ ring: f.geometry.coordinates[0] as [number, number][], height: h });
       } else if (f.geometry && f.geometry.type === "MultiPolygon") {
-        f.geometry.coordinates.forEach((poly) => maybeAddRing(poly[0] as [number, number][]));
+        f.geometry.coordinates.forEach((poly) => allRings.push({ ring: poly[0] as [number, number][], height: h }));
       }
     });
 
-    const candidateRings = Array.from(dedupedRings.values())
+    const candidateRings = allRings
       .map((ringRecord) => {
         const localRing = sanitizeFootprint(
           featureCoordinatesToLocal(ringRecord.ring, data.building.lng, data.building.lat),
@@ -2001,9 +1974,9 @@ export default function MapboxThreeScene({
         initialViewState={{
           longitude: data.building.lng,
           latitude: data.building.lat,
-          zoom: 18,
+          zoom: 17.9,
           pitch: 66,
-          bearing: -26,
+          bearing: 154,
         }}
         mapStyle="mapbox://styles/mapbox/dark-v11"
         onLoad={() => setMapReady(true)}
