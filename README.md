@@ -76,6 +76,24 @@ npm run backend:start
 - `src/` – Next.js frontend and API routes
 - `backend/` – FastAPI application (`backend.app.main:app`)
 
+## Fork and stay in sync with upstream
+
+If you deploy from your own fork (for example DigitalOcean only sees your repos), keep **`sarakhan7/wildhacks`** as the canonical upstream.
+
+1. Fork the repo on GitHub to your account.
+2. Point your local clone at the fork and add upstream. The fork repo name can differ from upstream (example: `wildhacks26`):
+
+   ```bash
+   git remote set-url origin git@github.com:Krrithen/wildhacks26.git
+   git remote add upstream https://github.com/sarakhan7/wildhacks.git
+   ```
+
+   If `upstream` already exists, use `git remote set-url upstream https://github.com/sarakhan7/wildhacks.git` instead of `add`.
+
+3. **GitHub Actions** (`.github/workflows/sync-upstream.yml`): merges **`upstream/main`** into **`main`** on your fork, then pushes to **`origin`**. It runs **daily** (08:00 UTC) and on **manual** “Run workflow” from the Actions tab. The job is **skipped** on `sarakhan7/wildhacks` itself so the canonical repo is not affected if this file is merged there.
+4. On a fork, GitHub may **disable scheduled workflows** until you enable Actions for the repository (Settings → Actions → General). **Workflow dispatch** still works for a manual sync anytime.
+5. If upstream changes conflict with commits only on your fork, the workflow run will fail until you resolve conflicts locally, merge or rebase, and push.
+
 ## Learn more
 
 - [Next.js documentation](https://nextjs.org/docs)

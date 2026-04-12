@@ -313,8 +313,8 @@ function ReportContent() {
                 <TrendingDown className="h-5 w-5 text-success" />
                 <div className="font-heading text-[1.35rem] font-bold tracking-[-0.05em] text-navy">04 · Financial model</div>
               </div>
-              <div className="h-[18rem]">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <div className="h-[18rem] min-h-0 min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <LineChart data={financialData}>
                     <XAxis
                       dataKey="year"
