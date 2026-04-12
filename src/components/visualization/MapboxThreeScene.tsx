@@ -1383,19 +1383,83 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
         anchor.z - edge.normal.z * 0.15,
       );
       const curve = cool
-        ? new THREE.CatmullRomCurve3([coolStart, coolCp1, coolCp2, coolEnd])
-        : new THREE.CatmullRomCurve3([warmStart, warmCp1, warmCp2, warmEnd]);
-      const pointCount = cool ? 22 : 26;
-      for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
-        const progress = pointIndex / Math.max(pointCount - 1, 1);
-        const point = curve.getPoint(progress);
-        positions.push(point.x, point.y, point.z);
-        progressValues.push(progress);
-        seeds.push(seed);
-        intensities.push(cool ? 0.46 : 0.58 + edge.emitterWeight * 0.34);
-        coolness.push(cool ? 1 : 0);
-        sizes.push(cool ? 3.8 - progress * 1.2 : 4.2 - progress * 1.4);
-      }
+  // Flowing Geometric Streamlines parallel to ground
+  const groundY = 0.5;
+  const globalWind = new THREE.Vector3(2.5, 0, 1.5);
+
+  type Stream = {
+    edge: ExteriorEdge;
+    t: number;
+    index: number;
+    cool: boolean;
+    isEntrance: boolean;
+  };
+
+  const streams: Stream[] = [];
+
+  exteriorEdges.forEach((edge) => {
+    if (edge.length < 1) return;
+
+    const lineSpacing = 1.2;
+    const emitterCount = Math.max(1, Math.round(edge.length / lineSpacing));
+
+    for (let i = 0; i < emitterCount; i++) {
+      const t = emitterCount === 1 ? 0.5 : i / (emitterCount - 1);
+      let distToHotspot = 999;
+      edge.hotspots.forEach((ht) => {
+        const d = Math.abs(ht - t) * edge.length;
+        if (d < distToHotspot) distToHotspot = d;
+      });
+
+      const isEntrance = distToHotspot < 4.0;
+      const cool = !isEntrance && (i % 3 !== 0);
+
+      streams.push({ edge, t, index: i, cool, isEntrance });
+    }
+
+    if (edge.hotspots.length > 0) {
+      edge.hotspots.forEach((ht, hidx) => {
+        streams.push({ edge, t: ht, index: hidx + 100, cool: false, isEntrance: true });
+        streams.push({ edge, t: Math.max(0, ht - 0.02), index: hidx + 200, cool: false, isEntrance: true });
+        streams.push({ edge, t: Math.min(1, ht + 0.02), index: hidx + 300, cool: false, isEntrance: true });
+      });
+    }
+  });
+
+  streams.forEach(({ edge, t, index, cool, isEntrance }, streamIndex) => {
+    const startX = edge.start.x + (edge.end.x - edge.start.x) * t;
+    const startZ = edge.start.z + (edge.end.z - edge.start.z) * t;
+
+    const seed = streamIndex * 0.15;
+    const reach = isEntrance ? 45 : 30;
+    const pointCount = isEntrance ? 80 : 60;
+    const dt = reach / (pointCount - 1);
+    const baseIntensity = isEntrance ? 1.0 : 0.6;
+
+    let currentPos = new THREE.Vector3(startX + edge.normal.x * 0.2, groundY, startZ + edge.normal.z * 0.2);
+    const exitSpeed = isEntrance ? 4.0 : 1.5;
+    let currentVel = new THREE.Vector3(edge.normal.x * exitSpeed, 0, edge.normal.z * exitSpeed);
+
+    for (let p = 0; p < pointCount; p++) {
+      const progress = p / Math.max(pointCount - 1, 1);
+      positions.push(currentPos.x, currentPos.y, currentPos.z);
+      progressValues.push(progress);
+      seeds.push(seed);
+      intensities.push(baseIntensity * (1.0 - progress));
+      coolness.push(cool ? 1 : 0);
+      sizes.push(isEntrance ? 3.5 : 2.0);
+
+      const dragFactor = isEntrance ? 0.3 : 0.6;
+      const windForce = new THREE.Vector3().copy(globalWind).sub(currentVel).multiplyScalar(dragFactor);
+      currentVel.addScaledVector(windForce, dt * 0.1);
+      currentPos.addScaledVector(currentVel, dt * 0.25);
+
+      const waveAmplitude = progress * 2.5;
+      const waveFreq = 0.5;
+      const waveDisplacement = Math.sin(currentPos.z * waveFreq + currentPos.x * waveFreq * 0.5) * waveAmplitude;
+
+      currentPos.x += edge.normal.z * waveDisplacement * dt * 0.05;
+      currentPos.z += -edge.normal.x * waveDisplacement * dt * 0.05;
     }
   });
 
@@ -1424,10 +1488,12 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
       attribute float aIntensity;
       attribute float aCool;
       attribute float aSize;
+      uniform float uTime;
       varying float vProgress;
       varying float vSeed;
       varying float vIntensity;
       varying float vCool;
+
       void main() {
         vProgress = aProgress;
         vSeed = aSeed;
@@ -1820,7 +1886,7 @@ export default function MapboxThreeScene({
           pitch: 66,
           bearing: -26,
         }}
-        mapStyle="mapbox://styles/mapbox/light-v11"
+        mapStyle="mapbox://styles/mapbox/dark-v11"
         onLoad={() => setMapReady(true)}
         onMouseMove={(event) => {
           const map = mapRef.current?.getMap();
