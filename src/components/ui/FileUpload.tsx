@@ -10,6 +10,19 @@ interface FileUploadProps {
   className?: string;
 }
 
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  const precision = exponent === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
+
+  return `${value.toFixed(precision)} ${units[exponent]}`;
+}
+
 export function FileUpload({
   onFilesSelected,
   maxFiles = 12,
@@ -126,7 +139,7 @@ export function FileUpload({
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-navy">{file.name}</div>
                     <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                      {formatFileSize(file.size)}
                     </div>
                   </div>
                 </div>
