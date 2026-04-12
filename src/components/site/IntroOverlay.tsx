@@ -21,8 +21,8 @@ function PanelLogo() {
       style={{ fontSize: "clamp(2.8rem, 7vw, 4.6rem)" }}
       aria-hidden
     >
-      <span style={{ color: "#ffffff" }}>Audit</span>
-      <span style={{ color: "#aad8f2" }}>AI</span>
+      <span style={{ color: "#ffffff" }}>Archi</span>
+      <span style={{ color: "#aad8f2" }}>tec</span>
     </p>
   );
 }

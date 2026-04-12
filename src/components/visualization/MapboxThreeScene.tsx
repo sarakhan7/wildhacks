@@ -312,36 +312,53 @@ function resolveFootprints(
 ): { parts: BuildingPart[]; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null {
   try {
     const point = map.project([data.building.lng, data.building.lat]);
-    const rendered = map.queryRenderedFeatures(
-      [[point.x - 120, point.y - 120], [point.x + 120, point.y + 120]],
-      { layers: ["visualization-context-buildings"] },
-    );
+    const sourceBounds = expandGeoBounds(data.solar.renderBounds, 0.02);
+    const sourceFeatures = map.querySourceFeatures("composite", {
+      sourceLayer: "building",
+    });
+    const renderedFallback =
+      sourceFeatures.length === 0
+        ? map.queryRenderedFeatures(
+            [[point.x - 160, point.y - 160], [point.x + 160, point.y + 160]],
+            { layers: ["visualization-context-buildings"] },
+          )
+        : [];
 
-    const allRings: Array<{ ring: [number, number][]; height: number }> = [];
-    rendered.forEach((f) => {
+    const dedupedRings = new Map<string, { ring: [number, number][]; height: number }>();
+    [...sourceFeatures, ...renderedFallback].forEach((f) => {
+      if (String(f.properties?.extrude ?? "") !== "true") {
+        return;
+      }
       const parsedHeight = Number(f.properties?.height ?? NaN);
       const parsedBase = Number(f.properties?.min_height ?? 0);
-      const h = Number.isFinite(parsedHeight) ? Math.max(0, parsedHeight - parsedBase) : data.building.inferredHeightMeters;
+      const h = Number.isFinite(parsedHeight)
+        ? Math.max(0, parsedHeight - parsedBase)
+        : data.building.inferredHeightMeters;
+      const maybeAddRing = (ring: [number, number][]) => {
+        if (!ring || ring.length < 3) {
+          return;
+        }
+        if (
+          !ringMatchesGeoBounds(ring, sourceBounds) &&
+          distanceToCenter(ring, data.building.lng, data.building.lat) > 0.0017
+        ) {
+          return;
+        }
+        const centroid = centroidOfRing(ring);
+        const key = `${centroid.lng.toFixed(6)}:${centroid.lat.toFixed(6)}:${h.toFixed(1)}`;
+        if (!dedupedRings.has(key)) {
+          dedupedRings.set(key, { ring, height: h });
+        }
+      };
+
       if (f.geometry && f.geometry.type === "Polygon") {
-        allRings.push({ ring: f.geometry.coordinates[0] as [number, number][], height: h });
+        maybeAddRing(f.geometry.coordinates[0] as [number, number][]);
       } else if (f.geometry && f.geometry.type === "MultiPolygon") {
-        f.geometry.coordinates.forEach((poly) => allRings.push({ ring: poly[0] as [number, number][], height: h }));
+        f.geometry.coordinates.forEach((poly) => maybeAddRing(poly[0] as [number, number][]));
       }
     });
 
-    const scopedBoundsList =
-      data.solar.sourceBuildings.length > 0
-        ? data.solar.sourceBuildings.map((entry) => expandGeoBounds(entry.bounds, 0.018))
-        : [expandGeoBounds(data.solar.renderBounds, 0.04)];
-    const unfilteredRings = allRings.filter(r => r.ring && r.ring.length >= 3);
-    const validRings =
-      scopedBoundsList.length > 0
-        ? unfilteredRings.filter((ring) => scopedBoundsList.some((bounds) => ringMatchesGeoBounds(ring.ring, bounds)))
-        : unfilteredRings;
-    const searchRings = validRings.length > 0 ? validRings : unfilteredRings;
-    if (searchRings.length === 0) return null;
-
-    const candidateRings = searchRings
+    const candidateRings = Array.from(dedupedRings.values())
       .map((ringRecord) => {
         const localRing = sanitizeFootprint(
           featureCoordinatesToLocal(ringRecord.ring, data.building.lng, data.building.lat),

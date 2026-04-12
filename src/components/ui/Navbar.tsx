@@ -12,8 +12,8 @@ export function Navbar() {
     <header className="pointer-events-none fixed inset-x-0 top-5 z-50 px-4 sm:px-6">
       <div className="pointer-events-auto mx-auto flex w-full max-w-[980px] items-center gap-4 glass-nav px-5 py-3 sm:px-7">
         <Link href="/" className="shrink-0 font-heading text-[1.15rem] font-extrabold tracking-[-0.05em]">
-          <span className="text-navy">Audit</span>
-          <span className="text-mid-navy">AI</span>
+          <span className="text-navy">Archi</span>
+          <span className="text-mid-navy">tec</span>
         </Link>
 
         <div className="hidden flex-1 items-center justify-end gap-6 md:flex">

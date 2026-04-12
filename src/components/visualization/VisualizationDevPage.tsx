@@ -27,7 +27,7 @@ type RoofCalibration = {
   flipY: boolean;
 };
 
-const STORAGE_AUDIT_ID = "architec.last-visualization-audit-id";
+const STORAGE_AUDIT_ID = "auditai.last-visualization-audit-id";
 const STORAGE_CALIBRATION = "architec.dev.roof-calibration";
 const STORAGE_PAYLOAD_PREFIX = "architec.visualization-payload:v2:";
 const DEFAULT_CALIBRATION: RoofCalibration = {
