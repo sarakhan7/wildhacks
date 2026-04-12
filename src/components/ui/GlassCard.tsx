@@ -11,12 +11,13 @@ interface GlassCardProps extends HTMLMotionProps<"div"> {
 }
 
 export function GlassCard({ children, className = "", strong = false, glow = false, ...rest }: GlassCardProps) {
-  const baseClass = strong ? "glass-strong" : "glass";
-  const glowClass = glow ? "glow-border" : "";
-  
+  const classes = [strong ? "glass-strong" : "glass", glow ? "glow-border" : "", "p-6", className]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <motion.div 
-      className={`\${baseClass} \${glowClass} p-6 \${className}`}
+    <motion.div
+      className={classes}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}

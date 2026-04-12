@@ -1,458 +1,376 @@
 "use client";
 
-import React, { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useAudit } from "@/context/AuditContext";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-import Map, { Marker, Layer } from "react-map-gl/mapbox";
-import 'mapbox-gl/dist/mapbox-gl.css';
-import { getBenchmarkForType } from "@/lib/benchmarks";
-import { GlassCard } from "@/components/ui/GlassCard";
-import { GaugeChart } from "@/components/ui/GaugeChart";
-import { BatteryWarning, Leaf, Zap, FileText, ArrowUpRight, TrendingDown, ThermometerSnowflake, DollarSign, AlertTriangle, Orbit, SunMedium, Waves } from "lucide-react";
-import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
+import {
+  AlertTriangle,
+  BarChart3,
+  FileText,
+  Orbit,
+  Sparkles,
+} from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+import { AuditTerminal } from "@/components/site/AuditTerminal";
+import { GlassCard } from "@/components/ui/GlassCard";
+import { useAudit } from "@/context/AuditContext";
 
 export default function ResultsDashboard() {
   const router = useRouter();
-  const {
-    buildingInfo,
-    analysisResults,
-    reportMarkdown,
-    peerInsights,
-    anomalies,
-    diagnosticHypotheses,
-    recommendations,
-    auditWarnings,
-  } = useAudit();
+  const { analysisResults, buildingInfo, peerInsights, anomalies, diagnosticHypotheses, recommendations, auditWarnings } = useAudit();
 
-  // Redirect if no analysis data exists (page reload)
   useEffect(() => {
     if (!analysisResults && typeof window !== "undefined") {
       router.push("/audit");
     }
   }, [analysisResults, router]);
 
-  if (!analysisResults) return null;
+  const chartData = useMemo(() => {
+    if (!analysisResults) {
+      return [];
+    }
 
-  const benchmark = getBenchmarkForType(buildingInfo.buildingType);
-  const percentile = peerInsights?.percentile ?? analysisResults.peerPercentile ?? 50;
-  const peerLabel = peerInsights?.archetype_label ?? analysisResults.clusterLabel ?? benchmark.label;
-  const climateZone = peerInsights?.climate_zone ?? analysisResults.climateZone ?? "Unassigned";
-  const topRecommendations = recommendations.slice(0, 3);
-  const flaggedAnomalies = anomalies.filter((signal) => signal.flagged);
-  // Prepare chart data
-  const chartData = analysisResults.monthlyBreakdown.map((m) => ({
-    name: m.month.split("-")[1], // Just the month number or short name
-    electric: Math.round(m.electricKbtu),
-    gas: Math.round(m.gasKbtu),
-    total: Math.round(m.totalKbtu),
-    isAnomaly: m.isAnomaly
-  }));
+    return analysisResults.monthlyBreakdown.map((month) => {
+      const baseline = Math.min(month.totalKbtu, analysisResults.estimatedBaseload);
+      const anomaly = month.isAnomaly ? Math.max(month.totalKbtu - baseline, 0) : 0;
+      const variable = Math.max(month.totalKbtu - baseline - anomaly, 0);
+
+      return {
+        month: month.label.split(" ")[0],
+        baseline: Math.round(baseline / 1000),
+        variable: Math.round(variable / 1000),
+        anomaly: Math.round(anomaly / 1000),
+      };
+    });
+  }, [analysisResults]);
+
+  if (!analysisResults) {
+    return null;
+  }
+
+  const percentile = Math.round(peerInsights?.percentile ?? analysisResults.peerPercentile ?? 50);
+  const flaggedAnomalies = anomalies.filter((item) => item.flagged);
+  const topRecommendations = recommendations.slice(0, 4);
+  const totalSavings = topRecommendations.reduce((sum, item) => sum + item.estimated_savings_usd, 0);
+  const buildingTypeLabel = buildingInfo.buildingType.replaceAll("_", " ");
+  const shortAddress = buildingInfo.address.split(",")[0] || buildingInfo.address;
+
+  const terminalLines = [
+    { label: "Building", value: shortAddress, valueClassName: "text-emerald-400" },
+    { label: "Type", value: buildingTypeLabel, valueClassName: "text-emerald-400" },
+    { label: "EUI", value: `${analysisResults.siteEUI.toFixed(1)} kBtu/ft²`, valueClassName: "text-emerald-400" },
+    { label: "Rank", value: `${percentile}th percentile`, valueClassName: "text-emerald-400" },
+    { label: "", value: "" },
+    {
+      label: "⚠ Anomaly",
+      value: flaggedAnomalies[0] ? `${flaggedAnomalies[0].month} flagged` : "No major anomaly",
+      valueClassName: flaggedAnomalies[0] ? "text-red-400" : "text-white/76",
+    },
+    {
+      label: "✓ Upgrades",
+      value: `${recommendations.length} recommendations`,
+      valueClassName: "text-emerald-400",
+    },
+    { label: "", value: "" },
+    ...topRecommendations.slice(0, 3).map((recommendation, index) => ({
+      label: `0${index + 1}`,
+      value: `${recommendation.title} · saves $${Math.round(recommendation.estimated_savings_usd).toLocaleString()}/yr`,
+    })),
+    { label: "", value: "" },
+    {
+      label: "Savings",
+      value: `$${Math.round(totalSavings).toLocaleString()}/yr`,
+      valueClassName: "text-sky-300",
+    },
+  ];
 
   return (
-    <div className="flex-1 overflow-auto bg-gradient-to-b from-[var(--bg-primary)] to-[var(--bg-secondary)]">
-      {/* Header Banner */}
-      <div className="w-full bg-[var(--bg-tertiary)] border-b border-[var(--border-subtle)] py-6 px-6 relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-1/3 h-full bg-gradient-to-l from-[var(--accent-green-dim)] to-transparent opacity-50" />
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center relative z-10">
-          <div>
-            <h1 className="text-3xl font-heading font-bold">{buildingInfo.address}</h1>
-            <div className="flex items-center gap-3 mt-2 text-sm text-[var(--text-muted)]">
-              <span className="px-2 py-1 glass rounded text-[var(--text-primary)] font-medium">
-                {peerLabel}
-              </span>
-              <span>{buildingInfo.squareFeet.toLocaleString()} sq ft</span>
-              <span>Built {buildingInfo.yearBuilt}</span>
-            </div>
-          </div>
-          <div className="mt-4 md:mt-0 flex gap-4">
-            <Link href="/audit" className="btn-secondary py-2">Edit Data</Link>
-            <Link href="/report" className="btn-primary flex items-center gap-2 py-2">
-              <FileText className="w-4 h-4" /> View Full Report
-            </Link>
-          </div>
+    <div className="min-h-screen px-6 pb-20 pt-32">
+      <div className="mx-auto max-w-6xl">
+        <div className="text-center">
+          <span className="eyebrow">Step 02 · Results</span>
+          <h1 className="section-title mt-4 text-navy">
+            Your building.
+            <span className="block text-mid-navy">Exposed.</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-3xl text-[1rem] leading-8 text-[var(--text-secondary)]">
+            AuditAI normalized the year, benchmarked the building, and ranked the best paths to savings.
+          </p>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* LEFT COLUMN */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
-          
-          {/* Top metric strip */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <GlassCard className="flex flex-col p-5">
-              <span className="text-[var(--text-muted)] text-sm font-medium flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-emerald-400" /> Annual Cost
-              </span>
-              <span className="text-3xl font-bold font-heading mt-2">
-                ${analysisResults.totalCost.toLocaleString()}
-              </span>
-              <span className="text-xs text-[var(--text-secondary)] mt-1">
-                ${analysisResults.costPerSqFt.toFixed(2)} / sq ft
-              </span>
-            </GlassCard>
+        <div className="mt-12 grid gap-4 md:grid-cols-3">
+          <MetricCard
+            label="Energy intensity"
+            value={analysisResults.siteEUI.toFixed(1)}
+            suffix="kBtu/ft²"
+            detail={`${percentile}th percentile`}
+            detailClassName="text-[var(--accent-red)]"
+          />
+          <MetricCard
+            label="Annual energy cost"
+            value={`$${analysisResults.totalCost.toLocaleString()}`}
+            detail={`$${analysisResults.annualSavingsOpportunity.toLocaleString()} avoidable`}
+            detailClassName="text-[var(--accent-red)]"
+          />
+          <MetricCard
+            label="Savings opportunity"
+            value={`$${analysisResults.annualSavingsOpportunity.toLocaleString()}/yr`}
+            detail={`${recommendations.length} ECMs identified`}
+            detailClassName="text-success"
+          />
+        </div>
 
-            <GlassCard className="flex flex-col p-5">
-              <span className="text-[var(--text-muted)] text-sm font-medium flex items-center gap-2">
-                <Zap className="w-4 h-4 text-amber-400" /> Total Energy
-              </span>
-              <span className="text-3xl font-bold font-heading mt-2">
-                {(analysisResults.totalEnergy / 1000).toFixed(1)}k <span className="text-lg font-normal">kBtu</span>
-              </span>
-            </GlassCard>
-
-            <GlassCard className="flex flex-col p-5 bg-gradient-to-br from-[var(--bg-glass)] to-[rgba(0,229,134,0.05)] border-[var(--border-accent)]">
-              <span className="text-[var(--accent-green)] text-sm font-medium flex items-center gap-2">
-                <TrendingDown className="w-4 h-4" /> Potential Savings
-              </span>
-              <span className="text-3xl font-bold font-heading mt-2 text-[#00e586]">
-                ${analysisResults.annualSavingsOpportunity.toLocaleString()}
-              </span>
-              <span className="text-xs text-[var(--text-secondary)] mt-1">Estimated vs Median</span>
-            </GlassCard>
-          </div>
-
-          {/* Consumption Chart */}
-          <GlassCard className="p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-heading font-medium">Monthly Consumption Signature (kBtu)</h3>
-              <div className="flex items-center gap-2 text-xs font-medium px-2 py-1 glass rounded-md">
-                <span className="w-3 h-3 rounded-full bg-[#06b6d4]"></span> Electricity
-                <span className="w-3 h-3 rounded-full bg-[#f59e0b] ml-2"></span> Gas
+        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_360px]">
+          <div className="space-y-6">
+            <GlassCard className="rounded-[2rem]">
+              <div className="mb-5 flex items-center justify-between gap-4">
+                <div>
+                  <div className="font-heading text-[1.45rem] font-bold tracking-[-0.05em] text-navy">
+                    Monthly consumption
+                  </div>
+                  <div className="mt-1 font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    Baseload, variable load, and anomalies
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-blue-dim)] px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-mid-navy">
+                  <BarChart3 className="h-3.5 w-3.5" /> Weather-aware
+                </span>
               </div>
-            </div>
-            
-            <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false}
-                    tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                    dy={10}
-                  />
-                  <YAxis 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                    tickFormatter={(val) => `${val / 1000}k`}
-                  />
-                  <Tooltip 
-                    cursor={{ fill: 'var(--bg-tertiary)' }}
-                    contentStyle={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '8px' }}
-                  />
-                  <Bar dataKey="electric" stackId="a" fill="#06b6d4" radius={[0, 0, 4, 4]} name="Electricity (kBtu)" />
-                  <Bar dataKey="gas" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Natural Gas (kBtu)" />
-                  <ReferenceLine y={analysisResults.estimatedBaseload} stroke="rgba(255,255,255,0.2)" strokeDasharray="3 3" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="text-center text-xs text-[var(--text-muted)] mt-2">
-              Dashed line represents theoretical baseload (always-on equipment: {analysisResults.baseloadPercent}% of total)
-            </div>
-          </GlassCard>
 
-          {/* Diagnostics */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <GlassCard className="p-6">
-              <h3 className="text-lg font-heading font-medium mb-4 flex items-center gap-2">
-                <ThermometerSnowflake className="text-cyan-400" /> Heating & Cooling
-              </h3>
+              <div className="h-[18rem] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
+                    <XAxis
+                      dataKey="month"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontFamily: "var(--font-mono)", fontSize: 11, fill: "rgba(14,28,42,0.58)" }}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontFamily: "var(--font-mono)", fontSize: 11, fill: "rgba(14,28,42,0.58)" }}
+                      tickFormatter={(value) => `${value}k`}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "rgba(255,255,255,0.28)" }}
+                      contentStyle={{
+                        backgroundColor: "rgba(255,255,255,0.84)",
+                        borderRadius: 18,
+                        border: "1px solid rgba(255,255,255,0.85)",
+                        color: "#0e1c2a",
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontFamily: "var(--font-mono)", fontSize: 11 }} />
+                    <Bar dataKey="baseline" stackId="load" fill="#3a6e92" radius={[4, 4, 0, 0]} name="Baseload" />
+                    <Bar dataKey="variable" stackId="load" fill="#c87830" radius={[4, 4, 0, 0]} name="Variable" />
+                    <Bar dataKey="anomaly" stackId="load" fill="#a02828" radius={[4, 4, 0, 0]} name="Anomaly" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </GlassCard>
+
+            <GlassCard className="rounded-[2rem]">
+              <div className="mb-5 flex items-center justify-between gap-4">
+                <div>
+                  <div className="font-heading text-[1.45rem] font-bold tracking-[-0.05em] text-navy">
+                    Diagnostic findings
+                  </div>
+                  <div className="mt-1 font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    Ranked engineering hypotheses
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-green-dim)] px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-success">
+                  <Sparkles className="h-3.5 w-3.5" /> {diagnosticHypotheses.length} findings
+                </span>
+              </div>
+
               <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-[var(--text-secondary)]">Heating Load</span>
-                    <span className="font-medium">{analysisResults.heatingPercent}%</span>
-                  </div>
-                  <div className="w-full bg-[var(--bg-tertiary)] rounded-full h-2">
-                    <div className="bg-orange-400 h-2 rounded-full" style={{ width: `${Math.min(100, analysisResults.heatingPercent)}%` }}></div>
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-[var(--text-secondary)]">Cooling Load</span>
-                    <span className="font-medium">{analysisResults.coolingPercent}%</span>
-                  </div>
-                  <div className="w-full bg-[var(--bg-tertiary)] rounded-full h-2">
-                    <div className="bg-cyan-400 h-2 rounded-full" style={{ width: `${Math.min(100, analysisResults.coolingPercent)}%` }}></div>
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-[var(--text-secondary)]">Baseload (Always On)</span>
-                    <span className="font-medium">{analysisResults.baseloadPercent}%</span>
-                  </div>
-                  <div className="w-full bg-[var(--bg-tertiary)] rounded-full h-2">
-                    <div className="bg-gray-400 h-2 rounded-full" style={{ width: `${Math.min(100, analysisResults.baseloadPercent)}%` }}></div>
-                  </div>
-                </div>
+                {diagnosticHypotheses.length > 0 ? (
+                  diagnosticHypotheses.slice(0, 3).map((hypothesis) => (
+                    <div key={hypothesis.hypothesis_id} className="rounded-[1.4rem] border border-white/60 bg-white/34 px-5 py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="font-heading text-[1.05rem] font-bold tracking-[-0.04em] text-navy">
+                          {hypothesis.title}
+                        </div>
+                        <span className="rounded-full bg-[var(--accent-blue-dim)] px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-mid-navy">
+                          Confidence {hypothesis.confidence}/5
+                        </span>
+                      </div>
+                      <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">{hypothesis.description}</p>
+                      <div className="mt-3 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                        Evidence months: {hypothesis.evidence_months.join(", ") || "None"}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm leading-7 text-[var(--text-secondary)]">No diagnostic findings were generated for this run.</p>
+                )}
               </div>
             </GlassCard>
 
-            <GlassCard className="p-6">
-              <h3 className="text-lg font-heading font-medium mb-4 flex items-center gap-2">
-                <BatteryWarning className="text-red-400" /> Demand & Anomalies
-              </h3>
-              <ul className="space-y-3">
-                <li className="flex gap-3 items-start">
-                  <div className="bg-[var(--bg-tertiary)] p-1.5 rounded text-[var(--text-muted)]">
-                    <ArrowUpRight className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="block text-sm font-medium">Load Factor</span>
-                    <span className="block text-xs text-[var(--text-secondary)]">
-                      {analysisResults.loadFactor 
-                        ? `${(analysisResults.loadFactor * 100).toFixed(0)}% (Goal: >65%)`
-                        : "Peak demand data not available"}
-                    </span>
-                  </div>
-                </li>
-                <li className="flex gap-3 items-start">
-                  <div className="bg-[var(--bg-tertiary)] p-1.5 rounded text-[var(--text-muted)]">
-                    <ThermometerSnowflake className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="block text-sm font-medium">Seasonal Ratio</span>
-                    <span className="block text-xs text-[var(--text-secondary)]">
-                      Peak month uses {analysisResults.seasonalVariation}x more energy than lowest
-                    </span>
-                  </div>
-                </li>
-                <li className="flex gap-3 items-start">
-                  <div className="bg-[var(--bg-tertiary)] p-1.5 rounded text-[var(--text-muted)]">
-                    <AlertTriangle className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="block text-sm font-medium">Flagged Months</span>
-                    <span className="block text-xs text-[var(--text-secondary)]">
-                      {flaggedAnomalies.length > 0
-                        ? flaggedAnomalies.map((signal) => signal.month).join(", ")
-                        : "No anomalous utility months detected"}
-                    </span>
-                  </div>
-                </li>
-              </ul>
-            </GlassCard>
+            {auditWarnings.length > 0 && (
+              <GlassCard className="rounded-[2rem] border-[rgba(160,40,40,0.2)]">
+                <div className="flex items-center gap-3 text-[var(--accent-red)]">
+                  <AlertTriangle className="h-4 w-4" />
+                  <div className="font-heading text-[1.1rem] font-bold tracking-[-0.04em]">Audit warnings</div>
+                </div>
+                <ul className="mt-4 space-y-3 text-sm leading-7 text-[var(--text-secondary)]">
+                  {auditWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </GlassCard>
+            )}
           </div>
 
-          <GlassCard className="p-6">
-            <div className="flex justify-between items-center mb-4 gap-4">
-              <h3 className="text-lg font-heading font-medium">Diagnostic Findings</h3>
-              <span className="text-xs text-[var(--text-muted)]">
-                {diagnosticHypotheses.length} hypotheses, {recommendations.length} ECMs
-              </span>
-            </div>
-            <div className="space-y-4">
-              {diagnosticHypotheses.length > 0 ? (
-                diagnosticHypotheses.slice(0, 4).map((hypothesis) => (
-                  <div key={hypothesis.hypothesis_id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
-                    <div className="flex justify-between gap-4 mb-2">
-                      <h4 className="font-medium text-sm">{hypothesis.title}</h4>
-                      <span className="text-xs text-[var(--text-muted)]">Confidence {hypothesis.confidence}/5</span>
-                    </div>
-                    <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{hypothesis.description}</p>
-                    <p className="text-xs text-[var(--text-muted)] mt-2">
-                      Evidence: {hypothesis.evidence_months.join(", ") || "None"}
-                    </p>
+          <div className="space-y-6">
+            <GlassCard className="rounded-[2rem]">
+              <div className="flex items-center gap-6">
+                <PercentileRing percentile={percentile} />
+                <div>
+                  <div className="font-heading text-[1.3rem] font-bold tracking-[-0.05em] text-navy">
+                    Peer benchmark
                   </div>
-                ))
-              ) : (
-                <p className="text-sm text-[var(--text-secondary)]">No diagnostic findings were generated for this run.</p>
-              )}
-            </div>
-          </GlassCard>
-        </div>
-
-        {/* RIGHT COLUMN */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
-          
-          {/* EUI Benchmark Card */}
-          <GlassCard strong glow className="border-[var(--border-accent)] relative overflow-hidden p-6 flex flex-col items-center">
-            <h3 className="text-lg font-medium self-start mb-2">ENERGY STAR Benchmark</h3>
-            <p className="text-xs text-[var(--text-muted)] self-start mb-6">Peer comparison based on CBECS microdata.</p>
-            
-            <GaugeChart 
-              value={analysisResults.siteEUI} 
-              percentile={percentile} 
-              max={Math.max(benchmark.medianSiteEUI * 2, analysisResults.siteEUI * 1.2)}
-            />
-            
-            <div className="w-full mt-8 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] p-4">
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-[var(--text-secondary)]">Your EUI</span>
-                <span className="font-bold">{analysisResults.siteEUI.toFixed(1)}</span>
-              </div>
-              <div className="flex justify-between text-sm border-t border-[var(--border-subtle)] pt-2 relative">
-                <span className="text-[var(--text-muted)]">Median {peerLabel}</span>
-                <span className="font-medium text-[var(--text-muted)]">
-                  {(peerInsights?.median_eui ?? benchmark.medianSiteEUI).toFixed(1)}
-                </span>
-              </div>
-            </div>
-            
-            <div className="mt-4 text-center">
-              <span className="text-xs font-semibold px-3 py-1 glass rounded-full opacity-80 border-none">
-                {percentile < 50 ? "Below Average" : "Above Average"} — {Math.floor(percentile)}th Percentile
-              </span>
-            </div>
-          </GlassCard>
-
-          <GlassCard className="relative overflow-hidden p-0">
-            <div className="relative h-[250px] overflow-hidden">
-              <Map
-                mapboxAccessToken={MAPBOX_TOKEN}
-                initialViewState={{
-                  longitude: buildingInfo.lng,
-                  latitude: buildingInfo.lat,
-                  zoom: 16,
-                  pitch: 58,
-                  bearing: 22
-                }}
-                mapStyle="mapbox://styles/mapbox/satellite-v9"
-                attributionControl={false}
-                interactive={false}
-              >
-                <Marker longitude={buildingInfo.lng} latitude={buildingInfo.lat} color="#00e586" />
-                <Layer
-                  id="3d-buildings"
-                  source="composite"
-                  source-layer="building"
-                  filter={["==", ["get", "extrude"], "true"]}
-                  type="fill-extrusion"
-                  paint={{
-                    "fill-extrusion-color": "#06b6d4",
-                    "fill-extrusion-height": ["coalesce", ["to-number", ["get", "height"]], 0],
-                    "fill-extrusion-base": ["coalesce", ["to-number", ["get", "min_height"]], 0],
-                    "fill-extrusion-opacity": 0.38
-                  }}
-                />
-              </Map>
-
-              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,7,18,0.05),rgba(3,7,18,0.66))]" />
-              <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-[rgba(255,196,77,0.35)] bg-[rgba(255,196,77,0.14)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-amber)]">
-                <SunMedium className="h-3.5 w-3.5" /> Google Solar Ready
-              </div>
-              <div className="absolute bottom-0 w-full p-5">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <Leaf className="w-4 h-4 text-green-400" /> Climate Zone: {climateZone}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                  <span className="rounded-full border border-[rgba(6,182,212,0.28)] bg-[rgba(6,182,212,0.14)] px-3 py-1.5 text-cyan-100">
-                    Real roof flux
-                  </span>
-                  <span className="rounded-full border border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.1)] px-3 py-1.5 text-rose-100">
-                    Thermal particles
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-[var(--border-subtle)] p-5">
-              <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-[rgba(6,182,212,0.14)] p-3 text-[var(--accent-cyan)]">
-                  <Orbit className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-lg font-heading font-semibold text-white">
-                    Open the 3D audit view
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-                    Inspect roof solar flux from Google Solar, modeled facade heat loss, and cinematic heat-flow particles in a dedicated scene.
+                  <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
+                    {buildingInfo.address} uses more energy than {percentile}% of similar {buildingTypeLabel} buildings
+                    in comparable conditions.
                   </p>
+                  <div className="mt-3 font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    {peerInsights?.archetype_label || "Benchmark"} · {peerInsights?.climate_zone || analysisResults.climateZone || "Climate zone pending"}
+                  </div>
                 </div>
               </div>
-
-              <div className="mt-4 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5">
-                  <SunMedium className="h-3.5 w-3.5 text-[var(--accent-amber)]" /> Roof heatmap
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5">
-                  <Waves className="h-3.5 w-3.5 text-[var(--accent-red)]" /> Particle flow
-                </span>
-              </div>
-
-              <Link href="/results/3d" className="btn-primary mt-5 flex w-full items-center justify-center gap-2 py-3">
-                <Orbit className="h-4 w-4" /> Open 3D View
-              </Link>
-            </div>
-          </GlassCard>
-
-          <GlassCard className="p-6">
-            <div className="flex justify-between items-center mb-4 gap-4">
-              <h3 className="text-lg font-heading font-medium">Top ECMs</h3>
-              <span className="text-xs text-[var(--text-muted)]">Tool-backed payback and NPV</span>
-            </div>
-            <div className="space-y-4">
-              {topRecommendations.length > 0 ? (
-                topRecommendations.map((recommendation) => (
-                  <div key={recommendation.recommendation_id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
-                    <div className="flex justify-between gap-4">
-                      <h4 className="font-medium text-sm">{recommendation.title}</h4>
-                      <span className="text-xs text-[var(--text-muted)]">{recommendation.implementation_complexity}</span>
-                    </div>
-                    <p className="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">{recommendation.description}</p>
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-                      <span className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1">
-                        Savings ${recommendation.estimated_savings_usd.toLocaleString()}
-                      </span>
-                      <span className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1">
-                        Payback {recommendation.simple_payback_years?.toFixed(1) ?? "n/a"} yrs
-                      </span>
-                      <span className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1">
-                        NPV ${recommendation.npv_10y.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-[var(--text-secondary)]">Recommendations will appear after the reasoning stage completes.</p>
-              )}
-            </div>
-          </GlassCard>
-
-          {auditWarnings.length > 0 && (
-            <GlassCard className="p-6 border-amber-500/40">
-              <div className="flex items-center gap-2 mb-3 text-amber-300">
-                <AlertTriangle className="w-4 h-4" />
-                <h3 className="text-lg font-heading font-medium">Audit Warnings</h3>
-              </div>
-              <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
-                {auditWarnings.map((warning) => (
-                  <li key={warning} className="leading-relaxed">
-                    {warning}
-                  </li>
-                ))}
-              </ul>
             </GlassCard>
-          )}
 
-          {/* CTA Link */}
-          {reportMarkdown && (
-             <motion.div 
-               whileHover={{ scale: 1.02 }}
-               whileTap={{ scale: 0.98 }}
-             >
-                <Link href="/report" className="w-full glass p-6 flex items-center justify-between group cursor-pointer hover:border-[var(--accent-green)] transition-colors">
+            <AuditTerminal lines={terminalLines} compact />
+
+            <GlassCard className="rounded-[2rem]">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div className="font-heading text-[1.3rem] font-bold tracking-[-0.05em] text-navy">Top upgrades</div>
+                <span className="font-mono text-[0.66rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  Highest annual savings
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {topRecommendations.length > 0 ? (
+                  topRecommendations.map((recommendation, index) => (
+                    <div key={recommendation.recommendation_id} className="rounded-[1.3rem] border border-white/56 bg-white/34 px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-blue-dim)] font-mono text-[0.68rem] uppercase tracking-[0.12em] text-mid-navy">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium text-navy">{recommendation.title}</div>
+                          <div className="mt-1 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                            {recommendation.implementation_complexity} complexity
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono text-[0.78rem] uppercase tracking-[0.12em] text-success">
+                            ${Math.round(recommendation.estimated_savings_usd).toLocaleString()}/yr
+                          </div>
+                          <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                            Payback {recommendation.simple_payback_years?.toFixed(1) ?? "n/a"} yr
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm leading-7 text-[var(--text-secondary)]">Recommendations will appear once the reasoning stage completes.</p>
+                )}
+              </div>
+            </GlassCard>
+
+            <GlassCard className="rounded-[2rem]">
+              <div className="font-heading text-[1.3rem] font-bold tracking-[-0.05em] text-navy">Next actions</div>
+              <div className="mt-4 space-y-3">
+                <Link href="/report" className="flex items-center justify-between rounded-[1.3rem] border border-white/58 bg-white/36 px-4 py-4 transition-colors hover:bg-white/46">
                   <div>
-                    <h3 className="font-heading font-semibold text-lg text-[var(--accent-green)] group-hover:drop-shadow-[0_0_8px_rgba(0,229,134,0.5)] transition-all">
-                      Read Structured Audit Report
-                    </h3>
-                    <p className="text-xs text-[var(--text-muted)] mt-1">Generated by the AuditAI reasoning pipeline</p>
+                    <div className="font-medium text-navy">Open the full audit report</div>
+                    <div className="mt-1 text-sm text-[var(--text-secondary)]">Executive summary, ECM table, and implementation guidance</div>
                   </div>
-                  <div className="bg-[var(--accent-green-dim)] p-3 rounded-full text-[var(--accent-green)] group-hover:bg-[var(--accent-green)] group-hover:text-black transition-colors">
-                    <FileText className="w-5 h-5" />
-                  </div>
+                  <FileText className="h-5 w-5 text-mid-navy" />
                 </Link>
-             </motion.div>
-          )}
 
+                <Link href="/results/3d" className="flex items-center justify-between rounded-[1.3rem] border border-white/58 bg-white/36 px-4 py-4 transition-colors hover:bg-white/46">
+                  <div>
+                    <div className="font-medium text-navy">Inspect the 3D audit view</div>
+                    <div className="mt-1 text-sm text-[var(--text-secondary)]">Explore roof solar flux and modeled heat-loss overlays</div>
+                  </div>
+                  <Orbit className="h-5 w-5 text-mid-navy" />
+                </Link>
+              </div>
+            </GlassCard>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  suffix,
+  detail,
+  detailClassName,
+}: {
+  label: string;
+  value: string;
+  suffix?: string;
+  detail: string;
+  detailClassName?: string;
+}) {
+  return (
+    <GlassCard className="rounded-[1.7rem] text-center">
+      <div className="font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">{label}</div>
+      <div className="mt-3 font-heading text-[2rem] font-extrabold tracking-[-0.05em] text-navy">
+        {value}
+        {suffix && <span className="ml-1 text-[0.95rem] font-medium">{suffix}</span>}
+      </div>
+      <div className={`mt-2 font-mono text-[0.7rem] uppercase tracking-[0.14em] ${detailClassName ?? "text-[var(--text-secondary)]"}`}>
+        {detail}
+      </div>
+    </GlassCard>
+  );
+}
+
+function PercentileRing({ percentile }: { percentile: number }) {
+  const circumference = 2 * Math.PI * 50;
+  const dash = (Math.min(Math.max(percentile, 0), 100) / 100) * circumference;
+
+  return (
+    <svg viewBox="0 0 120 120" className="h-28 w-28 flex-shrink-0">
+      <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(14,28,42,0.08)" strokeWidth="10" />
+      <circle
+        cx="60"
+        cy="60"
+        r="50"
+        fill="none"
+        stroke="#a02828"
+        strokeWidth="10"
+        strokeDasharray={`${dash} ${circumference}`}
+        strokeLinecap="round"
+        transform="rotate(-90 60 60)"
+      />
+      <text x="60" y="56" textAnchor="middle" className="font-heading" fontSize="26" fontWeight="800" fill="#0e1c2a">
+        {percentile}th
+      </text>
+      <text x="60" y="72" textAnchor="middle" style={{ fontFamily: "var(--font-mono)", fontSize: 10, fill: "rgba(14,28,42,0.42)" }}>
+        percentile
+      </text>
+    </svg>
   );
 }

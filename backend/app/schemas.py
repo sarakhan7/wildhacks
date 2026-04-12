@@ -248,3 +248,75 @@ class AuditResultsResponse(BaseModel):
     report: AuditReportArtifact
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class LocalPoint(BaseModel):
+    x: float
+    z: float
+
+
+class MeshGeometry(BaseModel):
+    vertices: list[float]
+    indices: list[int]
+    normals: list[float] = Field(default_factory=list)
+
+
+class SceneBuilding(BaseModel):
+    origin: dict[str, float]
+    height_m: float
+    footprint: list[LocalPoint]
+    roofMesh: MeshGeometry
+
+
+class VisualizationGrid(BaseModel):
+    width: int
+    height: int
+    values: list[float]
+
+
+class SolarSegmentStat(BaseModel):
+    pitchDegrees: float
+    azimuthDegrees: float
+    areaMeters2: float
+    sunshineQuantiles: list[float]
+
+
+class SceneSolar(BaseModel):
+    source: str
+    imageryDate: dict[str, int] | None = None
+    imageryProcessedDate: dict[str, int] | None = None
+    roofStats: dict[str, Any]
+    roofSegmentStats: list[SolarSegmentStat]
+    annualFluxGrid: VisualizationGrid
+    monthlyFluxGrids: list[dict[str, Any]]
+    roofMaskGrid: VisualizationGrid
+
+
+class VisualizationSurface(BaseModel):
+    id: str
+    kind: str
+    patchGrid: dict[str, int]
+    baseFluxWm2: float
+    normalizedIntensity: float
+    emitterRate: float
+    direction: str
+    patchValues: list[float]
+
+
+class ParticleEmitter(BaseModel):
+    surfaceId: str
+    rate: float
+    speed: float
+
+
+class SceneThermal(BaseModel):
+    source: str
+    surfaces: list[VisualizationSurface]
+    assumptions: dict[str, Any]
+    particleEmitters: list[ParticleEmitter] = Field(default_factory=list)
+
+
+class ScenePayloadResponse(BaseModel):
+    building: SceneBuilding
+    solar: SceneSolar
+    thermal: SceneThermal

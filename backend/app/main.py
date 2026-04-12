@@ -10,11 +10,14 @@ from .db import connect, init_db
 from .pipeline import AuditPipeline
 from .queue import AuditJobQueue
 from .repository import AuditRepository
-from .schemas import CreateAuditRequest, CreateAuditResponse, ReviewReadingsRequest
+from .schemas import CreateAuditRequest, CreateAuditResponse, ReviewReadingsRequest, ScenePayloadResponse
 from .services.ocr import OCRService
 from .services.reasoning import ReasoningService
 from .storage import DocumentStorageService
 from .services.weather import WeatherService
+from .services.geometry import BuildingMeshBuilder
+from .services.solar import SolarOverlayBuilder
+from .services.thermal import ThermalModelService
 
 
 app = FastAPI(title=settings.app_name)
@@ -110,3 +113,42 @@ def review_readings(audit_id: str, payload: ReviewReadingsRequest):
     repository.update_status(audit_id, status="pending", stage="queued", progress=12)
     queue.enqueue(audit_id, lambda: pipeline.rerun_from_review(audit_id))
     return {"audit_id": audit_id, "status": "queued", "review_count": len(payload.readings)}
+
+
+@app.get("/audits/{audit_id}/scene", response_model=ScenePayloadResponse)
+def audit_scene(audit_id: str):
+    try:
+        results = repository.get_results(audit_id)
+        building = results.get("building")
+        if not building:
+            raise KeyError("Building not found")
+            
+        building_model = type("obj", (object,), building)()
+        for k, v in building.items():
+            setattr(building_model, k, v)
+            
+        scene_building = BuildingMeshBuilder.build(building_model)
+        scene_solar = SolarOverlayBuilder.build(building_model)
+        
+        analysis = results.get("analysis", {})
+        analysis_model = type("obj", (object,), analysis)()
+        for k, v in analysis.items():
+            setattr(analysis_model, k, v)
+            
+        weather = results.get("weather", [])
+        weather_models = []
+        for w in weather:
+            wm = type("obj", (object,), w)()
+            for k, v in w.items():
+                setattr(wm, k, v)
+            weather_models.append(wm)
+            
+        scene_thermal = ThermalModelService.build(building_model, analysis_model, weather_models, scene_building.footprint, scene_building.height_m)
+        
+        return ScenePayloadResponse(
+            building=scene_building,
+            solar=scene_solar,
+            thermal=scene_thermal
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

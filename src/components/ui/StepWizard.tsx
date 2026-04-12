@@ -25,7 +25,7 @@ export function StepWizard({ steps, currentStepIndex, onStepChange, children }: 
             <motion.div 
               className="h-full bg-[var(--accent-orange)]"
               initial={{ width: "0%" }}
-              animate={{ width: `\${(currentStepIndex / (steps.length - 1)) * 100}%` }}
+              animate={{ width: `${(currentStepIndex / (steps.length - 1)) * 100}%` }}
               transition={{ duration: 0.5, ease: "easeInOut" }}
             />
           </div>
@@ -46,15 +46,21 @@ export function StepWizard({ steps, currentStepIndex, onStepChange, children }: 
                     if (onStepChange && idx <= currentStepIndex) onStepChange(idx);
                   }}
                   disabled={!onStepChange || idx > currentStepIndex}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold border-2 transition-all duration-300
-                    \${isActive ? 'border-[var(--accent-orange)] bg-[var(--bg-primary)] text-[var(--accent-orange)] shadow-[0_0_15px_rgba(254,123,2,0.3)]' : 
-                      isCompleted ? 'bg-[var(--accent-orange)] border-[var(--accent-orange)] text-[#0a0e17]' : 
-                      'bg-[var(--bg-secondary)] border-[var(--bg-tertiary)] text-[var(--text-muted)]'}
-                  `}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold border-2 transition-all duration-300 ${
+                    isActive
+                      ? "border-[var(--accent-orange)] bg-[var(--bg-primary)] text-[var(--accent-orange)] shadow-[0_0_15px_rgba(200,120,48,0.28)]"
+                      : isCompleted
+                        ? "bg-[var(--accent-orange)] border-[var(--accent-orange)] text-white"
+                        : "bg-[var(--bg-secondary)] border-[var(--bg-tertiary)] text-[var(--text-muted)]"
+                  }`}
                 >
                   {isCompleted ? <Check className="w-5 h-5" /> : idx + 1}
                 </button>
-                <div className={`absolute top-12 whitespace-nowrap text-xs font-medium \${isActive ? 'text-[var(--accent-orange)]' : 'text-[var(--text-muted)]'}`}>
+                <div
+                  className={`absolute top-12 whitespace-nowrap text-xs font-medium ${
+                    isActive ? "text-[var(--accent-orange)]" : "text-[var(--text-muted)]"
+                  }`}
+                >
                   {step}
                 </div>
               </div>

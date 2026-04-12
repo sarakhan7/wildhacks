@@ -2,18 +2,58 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import Map, { Marker } from "react-map-gl/mapbox";
-import 'mapbox-gl/dist/mapbox-gl.css';
-import { Search, MapPin, Building, Settings, FileBox, Zap } from "lucide-react";
+import "mapbox-gl/dist/mapbox-gl.css";
+import {
+  Building2,
+  CheckCircle2,
+  FileBox,
+  MapPin,
+  Search,
+  Settings2,
+  Sparkles,
+  Zap,
+} from "lucide-react";
+
 import { useAudit } from "@/context/AuditContext";
-import { StepWizard } from "@/components/ui/StepWizard";
-import { GlassCard } from "@/components/ui/GlassCard";
 import { FileUpload } from "@/components/ui/FileUpload";
+import { GlassCard } from "@/components/ui/GlassCard";
 import { LoadingPipeline } from "@/components/ui/LoadingPipeline";
 import type { AuditResultsBundle, AuditStatus } from "@/lib/audit-api";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+
+const steps = [
+  { id: "location", label: "Location", icon: MapPin },
+  { id: "details", label: "Profile", icon: Building2 },
+  { id: "systems", label: "Systems", icon: Settings2 },
+  { id: "files", label: "Bills", icon: FileBox },
+];
+
+const buildingTypes = [
+  { value: "office", label: "Office" },
+  { value: "retail", label: "Retail Store" },
+  { value: "multifamily", label: "Multifamily Housing" },
+  { value: "hospital", label: "Hospital / Healthcare" },
+  { value: "k12_school", label: "K-12 School" },
+  { value: "warehouse", label: "Warehouse" },
+  { value: "other", label: "Other" },
+];
+
+const hvacTypes = [
+  { value: "packaged_rtu", label: "Packaged rooftop units" },
+  { value: "chiller_boiler", label: "Central chiller / boiler plant" },
+  { value: "vav", label: "VAV system" },
+  { value: "vrf", label: "VRF / heat pump" },
+  { value: "split", label: "Split systems" },
+  { value: "unknown", label: "Not sure" },
+];
+
+const lightingTypes = [
+  { value: "led", label: "Mostly LED" },
+  { value: "fluorescent", label: "Mostly fluorescent" },
+  { value: "mixed", label: "Mixed lighting" },
+];
 
 type LocationSuggestion = {
   id: string;
@@ -26,8 +66,8 @@ type LocationSuggestion = {
 
 export default function AuditWizard() {
   const router = useRouter();
-  const { buildingInfo, setBuildingInfo, setAuditResults, setAuditId } = useAudit();
-  
+  const { buildingInfo, setBuildingInfo, setAuditId, setAuditResults } = useAudit();
+
   const [activeStep, setActiveStep] = useState(0);
   const [addressSearch, setAddressSearch] = useState("");
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
@@ -38,8 +78,6 @@ export default function AuditWizard() {
   const [analysisStage, setAnalysisStage] = useState(0);
   const [analysisError, setAnalysisError] = useState("");
   const skipNextAutocompleteRef = useRef(false);
-
-  const steps = ["Location", "Details", "Systems", "Data"];
 
   const stageToIndex: Record<AuditStatus["stage"], number> = {
     created: 0,
@@ -57,13 +95,13 @@ export default function AuditWizard() {
   };
 
   const searchLocations = async (query: string, signal?: AbortSignal) => {
-    const res = await fetch(`/api/geocode?query=${encodeURIComponent(query)}`, {
+    const response = await fetch(`/api/geocode?query=${encodeURIComponent(query)}`, {
       signal,
       cache: "no-store",
     });
-    const data = await res.json();
+    const data = await response.json();
 
-    if (!res.ok) {
+    if (!response.ok) {
       throw new Error(data.error || "Location search failed");
     }
 
@@ -104,15 +142,12 @@ export default function AuditWizard() {
         setIsSearchingLocation(true);
         const features = await searchLocations(query, controller.signal);
         setLocationSuggestions(features);
-        if (features.length === 0) {
-          setLocationError("No matching addresses found yet. Keep typing a street number and city.");
-        } else {
-          setLocationError("");
-        }
+        setLocationError(features.length === 0 ? "No matching addresses found yet. Try a full street address." : "");
       } catch (error) {
         if (controller.signal.aborted) {
           return;
         }
+
         setLocationSuggestions([]);
         setLocationError(error instanceof Error ? error.message : "Location search failed");
       } finally {
@@ -128,10 +163,11 @@ export default function AuditWizard() {
     };
   }, [addressSearch]);
 
-  // Step 1: Location geocoding handler
-  const handleGeocode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!addressSearch.trim()) return;
+  const handleGeocode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!addressSearch.trim()) {
+      return;
+    }
 
     try {
       setLocationError("");
@@ -144,24 +180,21 @@ export default function AuditWizard() {
       }
 
       setLocationSuggestions(features);
-      if (features.length > 1) {
-        setLocationError("Select the exact address from the list below.");
-        return;
-      }
-
-      setLocationError("No matching addresses found. Try a full street address with number, city, and state.");
+      setLocationError(
+        features.length > 1
+          ? "Select the exact property from the list below."
+          : "No matching addresses found. Try a street number, city, and state.",
+      );
     } catch (error) {
-      console.error("Geocoding failed:", error);
       setLocationError(error instanceof Error ? error.message : "Location search failed");
     } finally {
       setIsSearchingLocation(false);
     }
   };
 
-  // Final submission and analysis trigger
   const runFullAnalysis = async () => {
     if (files.length === 0 && buildingInfo.squareFeet === 0) {
-      alert("Please upload at least one utility bill and enter building details.");
+      setAnalysisError("Add at least one utility bill and basic building data before running the audit.");
       return;
     }
 
@@ -170,13 +203,13 @@ export default function AuditWizard() {
     setAnalysisError("");
 
     try {
-      const createRes = await fetch("/api/audits", {
+      const createResponse = await fetch("/api/audits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ building: buildingInfo }),
       });
-      const createData = await createRes.json();
-      if (!createRes.ok) {
+      const createData = await createResponse.json();
+      if (!createResponse.ok) {
         throw new Error(createData.error || createData.detail || "Failed to create audit");
       }
 
@@ -187,92 +220,87 @@ export default function AuditWizard() {
         const uploadFormData = new FormData();
         files.forEach((file) => uploadFormData.append("files", file));
         setAnalysisStage(1);
-        const uploadRes = await fetch(`/api/audits/${auditId}/files`, {
+        const uploadResponse = await fetch(`/api/audits/${auditId}/files`, {
           method: "POST",
           body: uploadFormData,
         });
-        const uploadData = await uploadRes.json();
-        if (!uploadRes.ok) {
+        const uploadData = await uploadResponse.json();
+        if (!uploadResponse.ok) {
           throw new Error(uploadData.error || uploadData.detail || "Failed to upload utility files");
         }
       }
 
-      const runRes = await fetch(`/api/audits/${auditId}/run`, { method: "POST" });
-      const runData = await runRes.json();
-      if (!runRes.ok) {
+      const runResponse = await fetch(`/api/audits/${auditId}/run`, { method: "POST" });
+      const runData = await runResponse.json();
+      if (!runResponse.ok) {
         throw new Error(runData.error || runData.detail || "Failed to queue audit");
       }
 
-      let status: AuditStatus | null = null;
       for (let attempt = 0; attempt < 120; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
-        const statusRes = await fetch(`/api/audits/${auditId}/status`, { cache: "no-store" });
-        const statusData = (await statusRes.json()) as AuditStatus & { detail?: string };
-        if (!statusRes.ok) {
+        const statusResponse = await fetch(`/api/audits/${auditId}/status`, { cache: "no-store" });
+        const statusData = (await statusResponse.json()) as AuditStatus & { detail?: string };
+        if (!statusResponse.ok) {
           throw new Error(statusData.detail || "Failed to fetch audit status");
         }
-        status = statusData;
-        setAnalysisStage(stageToIndex[status.stage]);
 
-        if (status.status === "failed") {
-          throw new Error(status.error || "Audit analysis failed");
+        setAnalysisStage(stageToIndex[statusData.stage]);
+
+        if (statusData.status === "failed") {
+          throw new Error(statusData.error || "Audit analysis failed");
         }
 
-        if (status.status === "completed" || status.status === "needs_review") {
+        if (statusData.status === "completed" || statusData.status === "needs_review") {
           break;
         }
       }
 
-      const resultsRes = await fetch(`/api/audits/${auditId}/results`, { cache: "no-store" });
-      const resultsData = await resultsRes.json();
-      if (!resultsRes.ok) {
+      const resultsResponse = await fetch(`/api/audits/${auditId}/results`, { cache: "no-store" });
+      const resultsData = await resultsResponse.json();
+      if (!resultsResponse.ok) {
         throw new Error(resultsData.error || resultsData.detail || "Failed to fetch audit results");
       }
 
       setAuditResults(resultsData as AuditResultsBundle);
       setAnalysisStage(4);
+
       setTimeout(() => {
         router.push("/results");
-      }, 1000);
-
+      }, 900);
     } catch (error) {
-      console.error(error);
       const message = error instanceof Error ? error.message : "Analysis failed";
       setAnalysisError(message);
-      alert(`${message}. Make sure the Python backend is running and try again.`);
       setIsSubmitting(false);
     }
   };
 
   if (isSubmitting) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
-        <GlassCard className="max-w-2xl w-full p-12 text-center" glow>
-          <motion.div 
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="mb-8"
-          >
-            <div className="w-24 h-24 bg-gradient-to-br from-[var(--accent-green)] to-[var(--accent-cyan)] rounded-2xl mx-auto flex items-center justify-center shadow-glow-green mb-6 animate-pulse">
-              <Settings className="w-12 h-12 text-[#0a0e17] animate-[spin_4s_linear_infinite]" />
+      <div className="flex min-h-screen items-center justify-center px-6 pb-16 pt-32">
+        <GlassCard strong className="w-full max-w-3xl rounded-[2rem] p-8 sm:p-10">
+          <div className="text-center">
+            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[1.6rem] bg-[var(--accent-blue-dim)] text-mid-navy">
+              <Sparkles className="h-8 w-8" />
             </div>
-            <h2 className="text-3xl font-heading font-bold mb-2">Analyzing Facility</h2>
-            <p className="text-[var(--text-muted)]">Our multi-agent pipeline is processing your data.</p>
-          </motion.div>
+            <span className="eyebrow">Running audit</span>
+            <h1 className="mt-4 font-heading text-[2.4rem] font-extrabold tracking-[-0.05em] text-navy">
+              Analyzing your building.
+            </h1>
+            <p className="mx-auto mt-4 max-w-2xl text-[1rem] leading-7 text-[var(--text-secondary)]">
+              We&apos;re parsing bills, normalizing weather, checking anomalies, and drafting the report.
+            </p>
+            {analysisError && <p className="mt-5 text-sm text-[var(--accent-red)]">{analysisError}</p>}
+          </div>
 
-          {analysisError && (
-            <p className="mb-6 text-sm text-red-300">{analysisError}</p>
-          )}
-          
-          <div className="mt-12 text-left">
-            <LoadingPipeline 
+          <div className="mt-10">
+            <LoadingPipeline
               activeStageIdx={analysisStage}
               stages={[
-                "Initiating analysis sequence...",
-                "Parsing PDFs and OCRing bill images",
-                "Calculating consumption footprint & weather signature",
-                "Drafting engineering diagnostic report",
-                "Finalizing results dashboard"
+                "Creating your audit workspace",
+                "Parsing uploaded utility bills",
+                "Running weather and benchmark analysis",
+                "Drafting recommendations and report",
+                "Packaging the results dashboard",
               ]}
             />
           </div>
@@ -282,272 +310,437 @@ export default function AuditWizard() {
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center py-12 px-6">
-      <div className="max-w-4xl w-full mb-8 text-center">
-        <h1 className="text-3xl md:text-4xl font-heading font-bold mb-4">Initial Assessment</h1>
-        <p className="text-[var(--text-secondary)]">Provide basic details to establish your building&apos;s baseline profile.</p>
-      </div>
+    <div className="min-h-screen px-6 pb-20 pt-32">
+      <div className="mx-auto max-w-6xl">
+        <div className="text-center">
+          <span className="eyebrow">Step 01 · Upload</span>
+          <h1 className="section-title mt-4 text-navy">
+            Tell us your
+            <span className="block text-mid-navy">building.</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-3xl text-[1rem] leading-8 text-[var(--text-secondary)]">
+            Build the baseline profile, upload the past year of utility bills, and let the pipeline generate
+            the audit.
+          </p>
+        </div>
 
-      <GlassCard className="w-full max-w-4xl p-8 shadow-card border-[var(--border-subtle)]">
-        <StepWizard 
-          steps={steps} 
-          currentStepIndex={activeStep}
-          onStepChange={setActiveStep}
-        >
-          {/* STEP 1: LOCATION */}
-          <div className="flex flex-col gap-6">
-            <h2 className="text-2xl font-semibold flex items-center gap-2"><MapPin className="text-[var(--accent-cyan)]" /> Locate Property</h2>
-            
-            <form onSubmit={handleGeocode} className="flex gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-muted)]" />
-                <input 
-                  type="text" 
-                  value={addressSearch}
-                  onChange={(e) => {
-                    skipNextAutocompleteRef.current = false;
-                    setAddressSearch(e.target.value);
-                    if (locationError) {
-                      setLocationError("");
-                    }
-                  }}
-                  placeholder="Search by building name or address (e.g., Technological Institute Evanston)"
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl py-3 pl-10 pr-4 text-white placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-cyan)] transition-colors"
-                />
-              </div>
-              <button type="submit" className="btn-secondary whitespace-nowrap">
-                {isSearchingLocation ? "Searching..." : "Search"}
-              </button>
-            </form>
+        <div className="mt-12 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <GlassCard strong className="rounded-[2rem] p-5 sm:p-7">
+            <div className="grid gap-3 sm:grid-cols-4">
+              {steps.map((step, index) => {
+                const Icon = step.icon;
+                const isActive = activeStep === index;
+                const isComplete = activeStep > index;
 
-            <p className="text-sm text-[var(--text-muted)]">
-              Search by building name or street address. Suggestions appear as you type so you can choose the exact property.
-            </p>
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    onClick={() => {
+                      if (index <= activeStep) {
+                        setActiveStep(index);
+                      }
+                    }}
+                    className={[
+                      "flex items-center gap-3 rounded-[1.3rem] border px-4 py-4 text-left transition-colors",
+                      isActive ? "border-white/80 bg-white/48" : "border-white/48 bg-white/20",
+                    ].join(" ")}
+                  >
+                    <div
+                      className={[
+                        "flex h-11 w-11 items-center justify-center rounded-[1rem]",
+                        isComplete || isActive ? "bg-[var(--accent-blue-dim)] text-mid-navy" : "bg-white/52 text-[var(--text-muted)]",
+                      ].join(" ")}
+                    >
+                      {isComplete ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+                    </div>
+                    <div>
+                      <div className="font-heading text-[1rem] font-bold tracking-[-0.04em] text-navy">{step.label}</div>
+                      <div className="font-mono text-[0.65rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                        {isComplete ? "Complete" : isActive ? "Current step" : "Upcoming"}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
-            {(isSearchingLocation || locationSuggestions.length > 0) && (
-              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] overflow-hidden">
-                {isSearchingLocation && locationSuggestions.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-[var(--text-muted)]">Looking up address matches...</div>
-                ) : (
-                  <ul className="divide-y divide-[var(--border-subtle)]">
-                    {locationSuggestions.map((feature, index) => (
-                      <li key={`${feature.id}-${index}`}>
-                        <button
-                          type="button"
-                          onClick={() => selectLocation(feature)}
-                          className="w-full px-4 py-3 text-left hover:bg-white/5 transition-colors"
+            <div className="mt-8">
+              {activeStep === 0 && (
+                <div className="space-y-6">
+                  <SectionHeader
+                    title="Locate the property"
+                    description="Search by address or building name. We use this to geocode the site and seed peer benchmarks."
+                  />
+
+                  <form onSubmit={handleGeocode} className="flex flex-col gap-3 sm:flex-row">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[var(--text-muted)]" />
+                      <input
+                        type="text"
+                        value={addressSearch}
+                        onChange={(event) => {
+                          skipNextAutocompleteRef.current = false;
+                          setAddressSearch(event.target.value);
+                          if (locationError) {
+                            setLocationError("");
+                          }
+                        }}
+                        placeholder="350 Fifth Avenue, New York, NY"
+                        className="h-14 w-full rounded-full border border-white/70 bg-white/50 pl-12 pr-5 text-[0.98rem] text-navy outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-white"
+                      />
+                    </div>
+                    <button type="submit" className="btn-primary min-w-[11rem]">
+                      {isSearchingLocation ? "Searching..." : "Find building"}
+                    </button>
+                  </form>
+
+                  {(isSearchingLocation || locationSuggestions.length > 0) && (
+                    <div className="overflow-hidden rounded-[1.6rem] border border-white/65 bg-white/36">
+                      {isSearchingLocation && locationSuggestions.length === 0 ? (
+                        <div className="px-5 py-4 text-sm text-[var(--text-muted)]">Looking up matching properties...</div>
+                      ) : (
+                        <ul className="divide-y divide-white/50">
+                          {locationSuggestions.map((feature, index) => (
+                            <li key={`${feature.id}-${index}`}>
+                              <button
+                                type="button"
+                                onClick={() => selectLocation(feature)}
+                                className="w-full px-5 py-4 text-left transition-colors hover:bg-white/32"
+                              >
+                                <div className="flex items-start justify-between gap-4">
+                                  <div>
+                                    <div className="font-medium text-navy">{feature.full_address}</div>
+                                    {feature.place_formatted && (
+                                      <div className="mt-1 text-sm text-[var(--text-secondary)]">{feature.place_formatted}</div>
+                                    )}
+                                  </div>
+                                  <span className="rounded-full bg-[var(--accent-blue-dim)] px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.16em] text-mid-navy">
+                                    {feature.feature_type || "match"}
+                                  </span>
+                                </div>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {locationError && <p className="text-sm text-[var(--accent-red)]">{locationError}</p>}
+
+                  {buildingInfo.lat !== 0 && (
+                    <div className="overflow-hidden rounded-[1.8rem] border border-white/65 bg-white/24">
+                      <div className="h-[22rem]">
+                        <Map
+                          mapboxAccessToken={MAPBOX_TOKEN}
+                          initialViewState={{
+                            longitude: buildingInfo.lng,
+                            latitude: buildingInfo.lat,
+                            zoom: 15,
+                            pitch: 42,
+                          }}
+                          mapStyle="mapbox://styles/mapbox/light-v11"
+                          attributionControl={false}
                         >
-                          <div className="flex items-center justify-between gap-4">
-                            <span className="font-medium text-white">{feature.full_address}</span>
-                            <span className="shrink-0 rounded-full bg-[var(--bg-primary)] px-2 py-1 text-xs text-[var(--text-muted)] uppercase">
-                              {feature.feature_type || "match"}
-                            </span>
-                          </div>
-                          {feature.place_formatted && (
-                            <div className="mt-1 text-sm text-[var(--text-muted)]">{feature.place_formatted}</div>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {locationError && (
-              <p className="text-sm text-red-300">{locationError}</p>
-            )}
-
-            {buildingInfo.lat !== 0 && (
-              <div className="h-[300px] w-full rounded-xl overflow-hidden border border-[var(--border-subtle)] relative">
-                <Map
-                  mapboxAccessToken={MAPBOX_TOKEN}
-                  initialViewState={{
-                    longitude: buildingInfo.lng,
-                    latitude: buildingInfo.lat,
-                    zoom: 15,
-                    pitch: 45
-                  }}
-                  mapStyle="mapbox://styles/mapbox/dark-v11"
-                  attributionControl={false}
-                >
-                  <Marker longitude={buildingInfo.lng} latitude={buildingInfo.lat} color="#00e586" />
-                </Map>
-                <div className="absolute bottom-4 left-4 glass px-4 py-2 text-sm font-medium">
-                  {buildingInfo.address}
+                          <Marker longitude={buildingInfo.lng} latitude={buildingInfo.lat} color="#1a6040" />
+                        </Map>
+                      </div>
+                      <div className="border-t border-white/55 px-5 py-4">
+                        <div className="font-heading text-[1.15rem] font-bold tracking-[-0.04em] text-navy">
+                          {buildingInfo.address}
+                        </div>
+                        <div className="mt-1 font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                          Location confirmed
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
-            
-            <div className="flex justify-end mt-6">
-              <button 
-                onClick={() => setActiveStep(1)} 
-                disabled={buildingInfo.lat === 0}
-                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next Step
-              </button>
-            </div>
-          </div>
+              )}
 
-          {/* STEP 2: DETAILS */}
-          <div className="flex flex-col gap-6">
-            <h2 className="text-2xl font-semibold flex items-center gap-2"><Building className="text-[var(--accent-blue)]" /> Building Profile</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Primary Use Type</label>
-                <select 
-                  value={buildingInfo.buildingType}
-                  onChange={(e) => setBuildingInfo({ buildingType: e.target.value })}
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl p-3 text-white focus:outline-none focus:border-[var(--accent-blue)]"
-                >
-                  <option value="office">Office</option>
-                  <option value="retail">Retail Store</option>
-                  <option value="multifamily">Multifamily Housing</option>
-                  <option value="hospital">Hospital / Healthcare</option>
-                  <option value="k12_school">K-12 School</option>
-                  <option value="warehouse">Warehouse</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Gross Floor Area (sq ft)</label>
-                <input 
-                  type="number" 
-                  value={buildingInfo.squareFeet || ""}
-                  onChange={(e) => setBuildingInfo({ squareFeet: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl p-3 text-white focus:outline-none focus:border-[var(--accent-blue)]"
-                  placeholder="e.g. 50000"
-                />
-              </div>
+              {activeStep === 1 && (
+                <div className="space-y-6">
+                  <SectionHeader
+                    title="Describe the building"
+                    description="These inputs help the benchmark and ECM ranking land in the right operating context."
+                  />
 
-              <div>
-                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Year Built</label>
-                <input 
-                  type="number" 
-                  value={buildingInfo.yearBuilt || ""}
-                  onChange={(e) => setBuildingInfo({ yearBuilt: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl p-3 text-white focus:outline-none focus:border-[var(--accent-blue)]"
-                />
-              </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FormField label="Primary use type">
+                      <select
+                        value={buildingInfo.buildingType}
+                        onChange={(event) => setBuildingInfo({ buildingType: event.target.value })}
+                        className={fieldClassName}
+                      >
+                        {buildingTypes.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </FormField>
 
-              <div>
-                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Operating Hours (per week)</label>
-                <input 
-                  type="number" 
-                  value={buildingInfo.operatingHours || ""}
-                  onChange={(e) => setBuildingInfo({ operatingHours: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl p-3 text-white focus:outline-none focus:border-[var(--accent-blue)]"
-                  placeholder="e.g. 60"
-                />
-              </div>
-            </div>
+                    <FormField label="Gross floor area (sq ft)">
+                      <input
+                        type="number"
+                        value={buildingInfo.squareFeet || ""}
+                        onChange={(event) => setBuildingInfo({ squareFeet: Number(event.target.value) || 0 })}
+                        className={fieldClassName}
+                        placeholder="125000"
+                      />
+                    </FormField>
 
-            <div className="flex justify-between mt-6">
-              <button onClick={() => setActiveStep(0)} className="btn-secondary">Back</button>
-              <button 
-                onClick={() => setActiveStep(2)} 
-                disabled={!buildingInfo.squareFeet}
-                className="btn-primary disabled:opacity-50"
-              >
-                Next Step
-              </button>
-            </div>
-          </div>
+                    <FormField label="Year built">
+                      <input
+                        type="number"
+                        value={buildingInfo.yearBuilt || ""}
+                        onChange={(event) => setBuildingInfo({ yearBuilt: Number(event.target.value) || 0 })}
+                        className={fieldClassName}
+                        placeholder="1987"
+                      />
+                    </FormField>
 
-          {/* STEP 3: SYSTEMS */}
-          <div className="flex flex-col gap-6">
-            <h2 className="text-2xl font-semibold flex items-center gap-2"><Settings className="text-[var(--accent-purple)]" /> Core Systems</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Primary HVAC Type</label>
-                <select 
-                  value={buildingInfo.hvacType}
-                  onChange={(e) => setBuildingInfo({ hvacType: e.target.value })}
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl p-3 text-white focus:outline-none focus:border-[var(--accent-purple)]"
-                >
-                  <option value="packaged_rtu">Packaged Rooftop Units (RTU)</option>
-                  <option value="chiller_boiler">Central Chiller / Boiler Plant</option>
-                  <option value="vav">VAV System</option>
-                  <option value="vtf">Variable Refrigerant Flow (VRF)</option>
-                  <option value="split">Split Systems / Heat Pumps</option>
-                  <option value="unknown">Not Sure</option>
-                </select>
-              </div>
+                    <FormField label="Floors">
+                      <input
+                        type="number"
+                        value={buildingInfo.floors || ""}
+                        onChange={(event) => setBuildingInfo({ floors: Number(event.target.value) || 0 })}
+                        className={fieldClassName}
+                        placeholder="12"
+                      />
+                    </FormField>
 
-              <div>
-                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Lighting</label>
-                <select 
-                  value={buildingInfo.lightingType}
-                  onChange={(e) => setBuildingInfo({ lightingType: e.target.value })}
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-xl p-3 text-white focus:outline-none focus:border-[var(--accent-purple)]"
-                >
-                  <option value="led">Mostly LED</option>
-                  <option value="fluorescent">Mostly Fluorescent (T8/T12)</option>
-                  <option value="mixed">Mixed</option>
-                </select>
-              </div>
-            </div>
+                    <FormField label="Operating hours per week">
+                      <input
+                        type="number"
+                        value={buildingInfo.operatingHours || ""}
+                        onChange={(event) => setBuildingInfo({ operatingHours: Number(event.target.value) || 0 })}
+                        className={fieldClassName}
+                        placeholder="60"
+                      />
+                    </FormField>
 
-            <div className="flex bg-[var(--bg-tertiary)] p-4 rounded-xl border border-[var(--border-subtle)] mt-4">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={buildingInfo.hasRenovations}
-                  onChange={(e) => setBuildingInfo({ hasRenovations: e.target.checked })}
-                  className="w-5 h-5 rounded border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--accent-green)] focus:ring-[var(--accent-green)]"
-                />
-                <div>
-                  <span className="block font-medium">Major renovations in last 5 years?</span>
-                  <span className="text-xs text-[var(--text-muted)]">Envelope, HVAC overhaul, etc.</span>
+                    <FormField label="Typical occupancy (%)">
+                      <input
+                        type="number"
+                        value={buildingInfo.occupancy || ""}
+                        onChange={(event) => setBuildingInfo({ occupancy: Number(event.target.value) || 0 })}
+                        className={fieldClassName}
+                        placeholder="90"
+                      />
+                    </FormField>
+                  </div>
                 </div>
-              </label>
+              )}
+
+              {activeStep === 2 && (
+                <div className="space-y-6">
+                  <SectionHeader
+                    title="Capture the main systems"
+                    description="We use these signals to prioritize the likely drivers behind excess energy use."
+                  />
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FormField label="Primary HVAC type">
+                      <select
+                        value={buildingInfo.hvacType}
+                        onChange={(event) => setBuildingInfo({ hvacType: event.target.value })}
+                        className={fieldClassName}
+                      >
+                        {hvacTypes.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </FormField>
+
+                    <FormField label="Lighting system">
+                      <select
+                        value={buildingInfo.lightingType}
+                        onChange={(event) => setBuildingInfo({ lightingType: event.target.value })}
+                        className={fieldClassName}
+                      >
+                        {lightingTypes.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </FormField>
+                  </div>
+
+                  <label className="flex cursor-pointer items-start gap-4 rounded-[1.5rem] border border-white/65 bg-white/36 px-5 py-5">
+                    <input
+                      type="checkbox"
+                      checked={buildingInfo.hasRenovations}
+                      onChange={(event) => setBuildingInfo({ hasRenovations: event.target.checked })}
+                      className="mt-1 h-5 w-5 rounded border-white/60 accent-[var(--mid-navy)]"
+                    />
+                    <div>
+                      <div className="font-heading text-[1.05rem] font-bold tracking-[-0.04em] text-navy">
+                        Major renovations in the last 5 years
+                      </div>
+                      <div className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
+                        Check this if the building has seen a major HVAC overhaul, envelope work, or significant
+                        retrofit recently.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {activeStep === 3 && (
+                <div className="space-y-6">
+                  <SectionHeader
+                    title="Upload the utility bills"
+                    description="A full year of bills gives the cleanest baseline, but you can still run the audit with fewer files."
+                  />
+
+                  <FileUpload onFilesSelected={setFiles} maxFiles={24} />
+
+                  <div className="rounded-[1.5rem] border border-white/65 bg-white/34 px-5 py-5">
+                    <div className="font-heading text-[1.05rem] font-bold tracking-[-0.04em] text-navy">Privacy notice</div>
+                    <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
+                      Utility files are parsed for the audit workflow only. They are not used to train public models.
+                    </p>
+                  </div>
+
+                  {analysisError && <p className="text-sm text-[var(--accent-red)]">{analysisError}</p>}
+                </div>
+              )}
             </div>
 
-            <div className="flex justify-between mt-6">
-              <button onClick={() => setActiveStep(1)} className="btn-secondary">Back</button>
-              <button onClick={() => setActiveStep(3)} className="btn-primary">Next Step</button>
-            </div>
-          </div>
-
-          {/* STEP 4: DATA UPLOAD */}
-          <div className="flex flex-col gap-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <h2 className="text-2xl font-semibold flex items-center gap-2"><FileBox className="text-[var(--accent-amber)]" /> Utility Documents</h2>
-                <p className="text-[var(--text-muted)] text-sm mt-1">Upload 12 months of consecutive bills for the most accurate baseline.</p>
-              </div>
-              <div className="bg-[var(--accent-amber)]/20 text-[var(--accent-amber)] text-xs px-3 py-1 rounded-full font-medium border border-[var(--accent-amber)]/30">
-                OCR Enabled
-              </div>
-            </div>
-
-            <FileUpload 
-              onFilesSelected={(f) => setFiles(f)} 
-              maxFiles={24}
-              className="my-4"
-            />
-            
-            <div className="bg-[var(--bg-tertiary)] border-l-4 border-[var(--accent-green)] p-4 rounded-r-xl">
-              <p className="text-sm font-medium">Privacy Notice</p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                Your data is parsed in-memory using stateless AI models. We do not permanently store your utility bills or use them to train public models.
-              </p>
-            </div>
-
-            <div className="flex justify-between mt-6">
-              <button onClick={() => setActiveStep(2)} className="btn-secondary">Back</button>
-              <button onClick={runFullAnalysis} className="btn-primary flex items-center gap-2">
-                <Zap className="w-4 h-4" /> Run Audit Pipeline
+            <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-white/60 pt-6">
+              <button
+                type="button"
+                onClick={() => setActiveStep((current) => Math.max(0, current - 1))}
+                className="btn-secondary"
+                disabled={activeStep === 0}
+              >
+                Back
               </button>
-            </div>
-          </div>
 
-        </StepWizard>
-      </GlassCard>
+              {activeStep < steps.length - 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveStep((current) => Math.min(steps.length - 1, current + 1))}
+                  className="btn-primary"
+                  disabled={
+                    (activeStep === 0 && buildingInfo.lat === 0) ||
+                    (activeStep === 1 && !buildingInfo.squareFeet) ||
+                    (activeStep === 2 && !buildingInfo.hvacType)
+                  }
+                >
+                  Continue
+                </button>
+              ) : (
+                <button type="button" onClick={runFullAnalysis} className="btn-primary">
+                  <Zap className="h-4 w-4" /> Run audit pipeline
+                </button>
+              )}
+            </div>
+          </GlassCard>
+
+          <div className="space-y-6">
+            <GlassCard className="rounded-[2rem]">
+              <div className="font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                Building profile
+              </div>
+              <div className="mt-4 space-y-4">
+                <SidebarValue label="Address" value={buildingInfo.address || "Waiting for a confirmed location"} />
+                <SidebarValue
+                  label="Type"
+                  value={buildingTypes.find((option) => option.value === buildingInfo.buildingType)?.label || "Office"}
+                />
+                <SidebarValue
+                  label="Floor area"
+                  value={buildingInfo.squareFeet ? `${buildingInfo.squareFeet.toLocaleString()} sq ft` : "Add profile details"}
+                />
+                <SidebarValue label="Year built" value={buildingInfo.yearBuilt ? String(buildingInfo.yearBuilt) : "Not set"} />
+                <SidebarValue
+                  label="HVAC"
+                  value={hvacTypes.find((option) => option.value === buildingInfo.hvacType)?.label || "Not set"}
+                />
+                <SidebarValue
+                  label="Lighting"
+                  value={lightingTypes.find((option) => option.value === buildingInfo.lightingType)?.label || "Not set"}
+                />
+              </div>
+            </GlassCard>
+
+            <GlassCard className="rounded-[2rem]">
+              <div className="font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                Audit checklist
+              </div>
+              <div className="mt-4 space-y-3">
+                <ChecklistRow label="Property located" done={buildingInfo.lat !== 0} />
+                <ChecklistRow label="Building profile added" done={Boolean(buildingInfo.squareFeet && buildingInfo.yearBuilt)} />
+                <ChecklistRow label="Systems captured" done={Boolean(buildingInfo.hvacType && buildingInfo.lightingType)} />
+                <ChecklistRow label="Utility bills uploaded" done={files.length > 0} />
+              </div>
+            </GlassCard>
+
+            <GlassCard className="rounded-[2rem]">
+              <div className="font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                What the pipeline does
+              </div>
+              <div className="mt-4 space-y-3 text-sm leading-7 text-[var(--text-secondary)]">
+                <p>1. Extract meter, usage, demand, and cost data from uploaded bills.</p>
+                <p>2. Normalize the year against weather and benchmark against similar buildings.</p>
+                <p>3. Flag anomalies and rank the highest-value ECMs for the report.</p>
+              </div>
+            </GlassCard>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+function SectionHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div>
+      <h2 className="font-heading text-[1.8rem] font-extrabold tracking-[-0.05em] text-navy">{title}</h2>
+      <p className="mt-2 max-w-3xl text-[0.98rem] leading-8 text-[var(--text-secondary)]">{description}</p>
+    </div>
+  );
+}
+
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <div className="mb-2 font-mono text-[0.68rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">{label}</div>
+      {children}
+    </label>
+  );
+}
+
+function SidebarValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[1.2rem] border border-white/56 bg-white/34 px-4 py-3">
+      <div className="font-mono text-[0.64rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">{label}</div>
+      <div className="mt-2 text-sm leading-6 text-navy">{value}</div>
+    </div>
+  );
+}
+
+function ChecklistRow({ label, done }: { label: string; done: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-full border border-white/56 bg-white/30 px-4 py-3">
+      <span className="text-sm text-navy">{label}</span>
+      <span
+        className={[
+          "inline-flex items-center rounded-full px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.16em]",
+          done ? "bg-[var(--accent-green-dim)] text-success" : "bg-white/55 text-[var(--text-muted)]",
+        ].join(" ")}
+      >
+        {done ? "Ready" : "Pending"}
+      </span>
+    </div>
+  );
+}
+
+const fieldClassName =
+  "h-14 w-full rounded-[1.1rem] border border-white/70 bg-white/48 px-4 text-[0.96rem] text-navy outline-none transition-colors focus:border-white";

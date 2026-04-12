@@ -6,3 +6,6 @@ numpy>=2.0,<3
 pandas>=2.2,<3
 scipy>=1.13,<2
 scikit-learn>=1.5,<2
+shapely>=2.0,<3
+tifffile>=2024.1.1
+requests>=2.31,<3

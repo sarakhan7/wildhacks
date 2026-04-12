@@ -4,8 +4,8 @@ import { Navbar } from "@/components/ui/Navbar";
 import { AuditProvider } from "@/context/AuditContext";
 
 export const metadata: Metadata = {
-  title: "AuditAI \u2014 Free Automated Energy Audit",
-  description: "Upload 12 months of utility bills and get a full prioritized energy audit with ROI estimates in under 10 minutes. No engineer required.",
+  title: "AuditAI",
+  description: "Free AI-driven commercial building energy audits with benchmarking, anomaly detection, and prioritized savings recommendations.",
 };
 
 export default function RootLayout({
@@ -14,13 +14,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased font-main">
-      <body className="min-h-full flex flex-col relative text-[var(--text-primary)]">
-        <div className="gradient-mesh" />
+    <html lang="en" className="h-full antialiased" data-scroll-behavior="smooth">
+      <body className="min-h-full text-[var(--text-primary)]">
         <AuditProvider>
-          <Navbar />
-          <div className="flex-1 mt-16 flex flex-col">
-            {children}
+          <div className="flex min-h-screen flex-col">
+            <Navbar />
+            <div className="flex-1">{children}</div>
           </div>
         </AuditProvider>
       </body>
