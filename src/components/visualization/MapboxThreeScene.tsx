@@ -309,8 +309,9 @@ function resolveFootprints(
 ): { parts: BuildingPart[]; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null {
   try {
     const point = map.project([data.building.lng, data.building.lat]);
+    const queryRadius = 220;
     const rendered = map.queryRenderedFeatures(
-      [[point.x - 120, point.y - 120], [point.x + 120, point.y + 120]],
+      [[point.x - queryRadius, point.y - queryRadius], [point.x + queryRadius, point.y + queryRadius]],
       { layers: ["visualization-context-buildings"] },
     );
 
@@ -406,6 +407,48 @@ function resolveFootprints(
     }
 
     const clusteredRings = Array.from(selected).map((index) => candidateRings[index]);
+    const supplementalRings = unfilteredRings
+      .map((ringRecord) => {
+        const localRing = sanitizeFootprint(
+          featureCoordinatesToLocal(ringRecord.ring, data.building.lng, data.building.lat),
+        );
+        if (localRing.length < 3) {
+          return null;
+        }
+        return {
+          ...ringRecord,
+          localRing,
+          localCentroid: centroidOfLocalRing(localRing),
+        };
+      })
+      .filter(
+        (
+          ringRecord,
+        ): ringRecord is {
+          ring: [number, number][];
+          height: number;
+          localRing: LocalPoint[];
+          localCentroid: LocalPoint;
+        } => Boolean(ringRecord),
+      )
+      .filter(
+        (ringRecord) =>
+          !clusteredRings.some(
+            (clustered) =>
+              clustered.ring === ringRecord.ring ||
+              clustered.localRing === ringRecord.localRing ||
+              centroidDistance(clustered.localCentroid, ringRecord.localCentroid) < 0.6,
+          ),
+      )
+      .filter((ringRecord) =>
+        clusteredRings.some(
+          (clustered) =>
+            ringsConnected(clustered.ring, ringRecord.ring) ||
+            localRingsNear(clustered.localRing, ringRecord.localRing, 12),
+        ),
+      );
+
+    clusteredRings.push(...supplementalRings);
 
     const parts: BuildingPart[] = [];
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -475,6 +518,10 @@ function clamp01(value: number) {
 function centroidOfLocalRing(ring: LocalPoint[]) {
   const sum = ring.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 });
   return { x: sum.x / ring.length, z: sum.z / ring.length };
+}
+
+function centroidDistance(a: LocalPoint, b: LocalPoint) {
+  return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
 function pointInLocalRing(point: LocalPoint, ring: LocalPoint[]) {
@@ -1298,168 +1345,120 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
   const intensities: number[] = [];
   const coolness: number[] = [];
   const sizes: number[] = [];
-
-  const coolEdges = exteriorEdges
-    .filter((edge) => edge.hotspots.length > 0 && edge.length >= 3)
-    .sort((a, b) => b.hotspots.length * b.length - a.hotspots.length * a.length)
-    .slice(0, 3);
-  const warmEdges = (
-    coolEdges.length > 0
-      ? coolEdges
-      : exteriorEdges
-          .filter((edge) => edge.length >= 8 && edge.emitterWeight >= 0.14)
-          .sort((a, b) => b.emitterWeight * b.length - a.emitterWeight * a.length)
-          .slice(0, 3)
-  );
-
-  const streams = [
-    ...warmEdges.flatMap((edge) => {
-      const emitters = edge.hotspots.length > 0 ? edge.hotspots.slice(0, 2) : edge.length > 22 ? [0.3, 0.7] : [0.5];
-      return emitters.map((t, index) => ({ edge, t, index, cool: false }));
-    }),
-    ...(
-      coolEdges.length > 0
-        ? coolEdges.flatMap((edge) => edge.hotspots.slice(0, 2).map((t, index) => ({ edge, t, index, cool: true })))
-        : exteriorEdges
-            .filter((edge) => edge.length >= 12)
-            .sort((a, b) => a.emitterWeight - b.emitterWeight || b.length - a.length)
-            .slice(0, 2)
-            .map((edge) => ({ edge, t: 0.5, index: 0, cool: true }))
-    ),
-  ];
-
-  streams.forEach(({ edge, t, index, cool }, streamIndex) => {
-    const baseAnchor = {
-      x: edge.start.x + (edge.end.x - edge.start.x) * t,
-      z: edge.start.z + (edge.end.z - edge.start.z) * t,
-    };
-    const filamentCount = cool ? 2 : 2;
-    for (let filament = 0; filament < filamentCount; filament += 1) {
-      const spread = filament - (filamentCount - 1) * 0.5;
-      const seed = streamIndex * 0.43 + index * 0.37 + filament * 0.19;
-      const anchor = {
-        x: baseAnchor.x + edge.tangent.x * spread * (cool ? 0.95 : 1.2),
-        z: baseAnchor.z + edge.tangent.z * spread * (cool ? 0.95 : 1.2),
-      };
-      const wallBaseY = Math.min(Math.max(edge.height * 0.16, 1.8), 4.2);
-      const warmStart = new THREE.Vector3(
-        anchor.x + edge.normal.x * 0.45,
-        wallBaseY,
-        anchor.z + edge.normal.z * 0.45,
-      );
-      const warmCp1 = new THREE.Vector3(
-        warmStart.x + edge.normal.x * (4.2 + edge.emitterWeight * 2.2) + edge.tangent.x * spread * 1.4,
-        wallBaseY + 1.4,
-        warmStart.z + edge.normal.z * (4.2 + edge.emitterWeight * 2.2) + edge.tangent.z * spread * 1.4,
-      );
-      const warmCp2 = new THREE.Vector3(
-        warmStart.x + edge.normal.x * (10.5 + edge.emitterWeight * 4.5) + edge.tangent.x * spread * 2.6,
-        wallBaseY + 5.5 + edge.emitterWeight * 2.2,
-        warmStart.z + edge.normal.z * (10.5 + edge.emitterWeight * 4.5) + edge.tangent.z * spread * 2.6,
-      );
-      const warmEnd = new THREE.Vector3(
-        warmStart.x + edge.normal.x * (17 + edge.emitterWeight * 7.5) + edge.tangent.x * spread * 4.2,
-        wallBaseY + 10 + edge.emitterWeight * 4.5,
-        warmStart.z + edge.normal.z * (17 + edge.emitterWeight * 7.5) + edge.tangent.z * spread * 4.2,
-      );
-      const coolStart = new THREE.Vector3(
-        anchor.x - edge.normal.x * 12.5 + edge.tangent.x * spread * 1.8,
-        wallBaseY + 1.2,
-        anchor.z - edge.normal.z * 12.5 + edge.tangent.z * spread * 1.8,
-      );
-      const coolCp1 = new THREE.Vector3(
-        anchor.x - edge.normal.x * 8 + edge.tangent.x * spread * 1.3,
-        wallBaseY + 2.6,
-        anchor.z - edge.normal.z * 8 + edge.tangent.z * spread * 1.3,
-      );
-      const coolCp2 = new THREE.Vector3(
-        anchor.x - edge.normal.x * 3.8 + edge.tangent.x * spread * 0.8,
-        wallBaseY + 1.4,
-        anchor.z - edge.normal.z * 3.8 + edge.tangent.z * spread * 0.8,
-      );
-      const coolEnd = new THREE.Vector3(
-        anchor.x - edge.normal.x * 0.15,
-        wallBaseY + 0.4,
-        anchor.z - edge.normal.z * 0.15,
-      );
-      const curve = cool
-  // Flowing Geometric Streamlines parallel to ground
-  const groundY = 0.5;
-  const globalWind = new THREE.Vector3(2.5, 0, 1.5);
-
   type Stream = {
     edge: ExteriorEdge;
     t: number;
     index: number;
     cool: boolean;
-    isEntrance: boolean;
+    entranceDriven: boolean;
   };
 
-  const streams: Stream[] = [];
+  const warmEdges = exteriorEdges
+    .filter((edge) => edge.length >= 7 && edge.emitterWeight >= 0.12)
+    .sort((a, b) => b.emitterWeight * b.length - a.emitterWeight * a.length)
+    .slice(0, 4);
+  const coolEdges = exteriorEdges
+    .filter((edge) => edge.hotspots.length > 0 && edge.length >= 3)
+    .sort((a, b) => b.hotspots.length * b.length - a.hotspots.length * a.length)
+    .slice(0, 3);
 
-  exteriorEdges.forEach((edge) => {
-    if (edge.length < 1) return;
+  const streams: Stream[] = [
+    ...warmEdges.flatMap((edge) => {
+      const emitters = edge.hotspots.length > 0 ? edge.hotspots.slice(0, 2) : edge.length > 18 ? [0.32, 0.68] : [0.5];
+      return emitters.map((t, index) => ({
+        edge,
+        t,
+        index,
+        cool: false,
+        entranceDriven: edge.hotspots.length > 0,
+      }));
+    }),
+    ...coolEdges.flatMap((edge) =>
+      edge.hotspots.slice(0, 2).map((t, index) => ({
+        edge,
+        t,
+        index,
+        cool: true,
+        entranceDriven: true,
+      })),
+    ),
+  ];
 
-    const lineSpacing = 1.2;
-    const emitterCount = Math.max(1, Math.round(edge.length / lineSpacing));
+  streams.forEach(({ edge, t, index, cool, entranceDriven }, streamIndex) => {
+    const baseAnchor = {
+      x: edge.start.x + (edge.end.x - edge.start.x) * clamp01(t),
+      z: edge.start.z + (edge.end.z - edge.start.z) * clamp01(t),
+    };
+    const filamentCount = entranceDriven ? 2 : 1;
 
-    for (let i = 0; i < emitterCount; i++) {
-      const t = emitterCount === 1 ? 0.5 : i / (emitterCount - 1);
-      let distToHotspot = 999;
-      edge.hotspots.forEach((ht) => {
-        const d = Math.abs(ht - t) * edge.length;
-        if (d < distToHotspot) distToHotspot = d;
+    for (let filament = 0; filament < filamentCount; filament += 1) {
+      const spread = filament - (filamentCount - 1) * 0.5;
+      const seed = streamIndex * 0.43 + index * 0.37 + filament * 0.19;
+      const anchor = {
+        x: baseAnchor.x + edge.tangent.x * spread * (cool ? 0.85 : 1.15),
+        z: baseAnchor.z + edge.tangent.z * spread * (cool ? 0.85 : 1.15),
+      };
+      const baseY = Math.min(Math.max(edge.height * 0.18, 1.6), 4.0);
+
+      const start = cool
+        ? new THREE.Vector3(
+            anchor.x - edge.normal.x * 11.5,
+            baseY + 1.1,
+            anchor.z - edge.normal.z * 11.5,
+          )
+        : new THREE.Vector3(
+            anchor.x + edge.normal.x * 0.4,
+            baseY,
+            anchor.z + edge.normal.z * 0.4,
+          );
+      const cp1 = cool
+        ? new THREE.Vector3(
+            anchor.x - edge.normal.x * 7.2 + edge.tangent.x * spread * 1.1,
+            baseY + 2.2,
+            anchor.z - edge.normal.z * 7.2 + edge.tangent.z * spread * 1.1,
+          )
+        : new THREE.Vector3(
+            start.x + edge.normal.x * (4.6 + edge.emitterWeight * 2.4) + edge.tangent.x * spread * 1.2,
+            baseY + 1.5,
+            start.z + edge.normal.z * (4.6 + edge.emitterWeight * 2.4) + edge.tangent.z * spread * 1.2,
+          );
+      const cp2 = cool
+        ? new THREE.Vector3(
+            anchor.x - edge.normal.x * 3.0 + edge.tangent.x * spread * 0.7,
+            baseY + 1.0,
+            anchor.z - edge.normal.z * 3.0 + edge.tangent.z * spread * 0.7,
+          )
+        : new THREE.Vector3(
+            start.x + edge.normal.x * (10.8 + edge.emitterWeight * 4.1) + edge.tangent.x * spread * 2.4,
+            baseY + 5.2 + edge.emitterWeight * 2.1,
+            start.z + edge.normal.z * (10.8 + edge.emitterWeight * 4.1) + edge.tangent.z * spread * 2.4,
+          );
+      const end = cool
+        ? new THREE.Vector3(
+            anchor.x - edge.normal.x * 0.2,
+            baseY + 0.35,
+            anchor.z - edge.normal.z * 0.2,
+          )
+        : new THREE.Vector3(
+            start.x + edge.normal.x * (16.5 + edge.emitterWeight * 6.8) + edge.tangent.x * spread * 3.8,
+            baseY + 9.2 + edge.emitterWeight * 4.0,
+            start.z + edge.normal.z * (16.5 + edge.emitterWeight * 6.8) + edge.tangent.z * spread * 3.8,
+          );
+
+      const curve = new THREE.CubicBezierCurve3(start, cp1, cp2, end);
+      const pointCount = cool ? 34 : 42;
+      const curvePoints = curve.getPoints(pointCount - 1);
+      const baseIntensity = cool ? 0.58 : 0.78 + edge.emitterWeight * 0.22;
+
+      curvePoints.forEach((point, pointIndex) => {
+        const progress = pointIndex / Math.max(curvePoints.length - 1, 1);
+        positions.push(point.x, point.y, point.z);
+        progressValues.push(progress);
+        seeds.push(seed);
+        intensities.push(baseIntensity * (1 - progress * 0.18));
+        coolness.push(cool ? 1 : 0);
+        sizes.push(cool ? 2.4 : entranceDriven ? 3.2 : 2.8);
       });
-
-      const isEntrance = distToHotspot < 4.0;
-      const cool = !isEntrance && (i % 3 !== 0);
-
-      streams.push({ edge, t, index: i, cool, isEntrance });
-    }
-
-    if (edge.hotspots.length > 0) {
-      edge.hotspots.forEach((ht, hidx) => {
-        streams.push({ edge, t: ht, index: hidx + 100, cool: false, isEntrance: true });
-        streams.push({ edge, t: Math.max(0, ht - 0.02), index: hidx + 200, cool: false, isEntrance: true });
-        streams.push({ edge, t: Math.min(1, ht + 0.02), index: hidx + 300, cool: false, isEntrance: true });
-      });
-    }
-  });
-
-  streams.forEach(({ edge, t, index, cool, isEntrance }, streamIndex) => {
-    const startX = edge.start.x + (edge.end.x - edge.start.x) * t;
-    const startZ = edge.start.z + (edge.end.z - edge.start.z) * t;
-
-    const seed = streamIndex * 0.15;
-    const reach = isEntrance ? 45 : 30;
-    const pointCount = isEntrance ? 80 : 60;
-    const dt = reach / (pointCount - 1);
-    const baseIntensity = isEntrance ? 1.0 : 0.6;
-
-    let currentPos = new THREE.Vector3(startX + edge.normal.x * 0.2, groundY, startZ + edge.normal.z * 0.2);
-    const exitSpeed = isEntrance ? 4.0 : 1.5;
-    let currentVel = new THREE.Vector3(edge.normal.x * exitSpeed, 0, edge.normal.z * exitSpeed);
-
-    for (let p = 0; p < pointCount; p++) {
-      const progress = p / Math.max(pointCount - 1, 1);
-      positions.push(currentPos.x, currentPos.y, currentPos.z);
-      progressValues.push(progress);
-      seeds.push(seed);
-      intensities.push(baseIntensity * (1.0 - progress));
-      coolness.push(cool ? 1 : 0);
-      sizes.push(isEntrance ? 3.5 : 2.0);
-
-      const dragFactor = isEntrance ? 0.3 : 0.6;
-      const windForce = new THREE.Vector3().copy(globalWind).sub(currentVel).multiplyScalar(dragFactor);
-      currentVel.addScaledVector(windForce, dt * 0.1);
-      currentPos.addScaledVector(currentVel, dt * 0.25);
-
-      const waveAmplitude = progress * 2.5;
-      const waveFreq = 0.5;
-      const waveDisplacement = Math.sin(currentPos.z * waveFreq + currentPos.x * waveFreq * 0.5) * waveAmplitude;
-
-      currentPos.x += edge.normal.z * waveDisplacement * dt * 0.05;
-      currentPos.z += -edge.normal.x * waveDisplacement * dt * 0.05;
     }
   });
 

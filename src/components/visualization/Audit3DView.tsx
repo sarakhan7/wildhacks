@@ -74,6 +74,8 @@ export default function Audit3DView() {
       return;
     }
 
+    window.localStorage.setItem("auditai.last-visualization-audit-id", auditId);
+
     let active = true;
     async function loadVisualization() {
       setIsLoading(true);
