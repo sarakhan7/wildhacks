@@ -19,11 +19,11 @@ export function LoadingPipeline({ stages, activeStageIdx }: LoadingPipelineProps
         return (
           <div key={stage} className={`flex items-center gap-3 transition-opacity duration-500 \${isPending ? 'opacity-40' : 'opacity-100'}`}>
             <div className="flex-shrink-0 w-6 flex justify-center">
-              {isCompleted && <CheckCircle2 className="w-5 h-5 text-[var(--accent-green)]" />}
-              {isActive && <Loader2 className="w-5 h-5 text-[var(--accent-cyan)] animate-spin" />}
+              {isCompleted && <CheckCircle2 className="w-5 h-5 text-[var(--accent-orange)]" />}
+              {isActive && <Loader2 className="w-5 h-5 text-[var(--accent-purple)] animate-spin" />}
               {isPending && <Circle className="w-5 h-5 text-[var(--text-muted)]" />}
             </div>
-            <span className={`font-medium \${isActive ? 'text-[var(--accent-cyan)] animate-pulse-glow' : ''} \${isCompleted ? 'text-gray-300' : ''}`}>
+            <span className={`font-medium \${isActive ? 'text-[var(--accent-purple)] animate-pulse-glow' : ''} \${isCompleted ? 'text-gray-300' : ''}`}>
               {stage}
             </span>
           </div>

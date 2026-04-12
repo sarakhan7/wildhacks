@@ -66,7 +66,7 @@ export function FileUpload({
     <div className={`w-full ${className}`}>
       <div 
         className={`relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center transition-all 
-          ${dragActive ? 'border-[var(--accent-green)] bg-[var(--accent-green-dim)]' : 'border-[var(--border-subtle)] hover:border-[var(--accent-cyan-dim)] hover:bg-[rgba(255,255,255,0.02)]'}
+          ${dragActive ? 'border-[var(--accent-orange)] bg-[var(--accent-orange-dim)]' : 'border-[var(--border-subtle)] hover:border-[var(--accent-purple-dim)] hover:bg-[rgba(255,255,255,0.02)]'}
         `}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -82,7 +82,7 @@ export function FileUpload({
         />
         
         <div className="bg-[var(--bg-tertiary)] p-4 rounded-full mb-4">
-          <UploadCloud className="w-8 h-8 text-[var(--accent-cyan)]" />
+          <UploadCloud className="w-8 h-8 text-[var(--accent-purple)]" />
         </div>
         <h3 className="text-lg font-medium mb-1">Drag & drop utility bills here</h3>
         <p className="text-sm text-[var(--text-muted)] mb-4 text-center">
@@ -101,7 +101,7 @@ export function FileUpload({
               Selected Files ({selectedFiles.length}/{maxFiles})
             </h4>
             {selectedFiles.length >= 12 && (
-              <span className="text-xs text-[var(--accent-green)] flex items-center gap-1">
+              <span className="text-xs text-[var(--accent-orange)] flex items-center gap-1">
                 <CheckCircle className="w-3 h-3" /> Full Year Ready
               </span>
             )}

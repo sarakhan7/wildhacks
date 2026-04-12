@@ -1,22 +1,11 @@
 import type { Metadata } from "next";
-import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/ui/Navbar";
 import { AuditProvider } from "@/context/AuditContext";
 
-const interBody = Inter({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const outfitHeading = Outfit({
-  variable: "--font-geist-mono", 
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "AuditAI | Fast Automated Energy Audits",
-  description: "Get a commercial building energy audit in under 10 minutes",
+  title: "AuditAI \u2014 Free Automated Energy Audit",
+  description: "Upload 12 months of utility bills and get a full prioritized energy audit with ROI estimates in under 10 minutes. No engineer required.",
 };
 
 export default function RootLayout({
@@ -25,11 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`\${interBody.variable} \${outfitHeading.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col relative text-[#f1f5f9]">
+    <html lang="en" className="h-full antialiased font-main">
+      <body className="min-h-full flex flex-col relative text-[var(--text-primary)]">
         <div className="gradient-mesh" />
         <AuditProvider>
           <Navbar />
