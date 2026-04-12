@@ -113,9 +113,9 @@ export default function Home() {
           <div className="city-overlay absolute inset-0" />
         </div>
 
-        <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-6 pb-20 pt-32 sm:pt-36">
+        <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-6 pb-20 pt-20 sm:pt-24">
           <div className="grid flex-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(360px,560px)] lg:items-center">
-            <div className="max-w-3xl pt-10 lg:pt-24">
+            <div className="max-w-3xl pt-0 lg:pt-10">
               <h1 className="display-title max-w-4xl text-white [text-shadow:0_6px_32px_rgba(0,0,0,0.28)]">
                 Your building
                 <br />
@@ -132,19 +132,16 @@ export default function Home() {
               </p>
 
               <div className="mt-10 flex flex-wrap gap-4">
-                <Link href="/audit" className="btn-primary bg-white px-8 py-4 text-[1rem] text-navy">
-                  Start free audit
-                </Link>
                 <Link
                   href="/report?demo=1"
                   className="btn-secondary border-white/35 bg-white/12 px-8 py-4 text-[1rem] text-white hover:bg-white/20"
                 >
-                  See a sample report <ArrowRight className="h-4 w-4" />
+                  Run the live demo <ArrowRight className="h-4 w-4" />
                 </Link>
               </div>
             </div>
 
-            <div className="flex items-center justify-center lg:justify-end lg:pt-24">
+            <div className="flex items-center justify-center lg:justify-end lg:pt-10">
               <AuditTerminal lines={terminalLines} title="350 Fifth Ave · audit complete" />
             </div>
           </div>
@@ -226,10 +223,6 @@ export default function Home() {
           <p className="mx-auto mt-6 max-w-2xl text-lg font-light leading-8 text-navy">
             Upload your bills and let AuditAI do the rest.
           </p>
-          <Link href="/audit" className="btn-primary mt-10 px-9 py-4 text-[1rem]">
-            Start your free audit <ArrowRight className="h-4 w-4" />
-          </Link>
-
           <div className="mt-16 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy">
             © 2026 AuditAI · Free automated energy audits
           </div>
