@@ -1,14 +1,14 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Download,
   FileCheck,
   TrendingDown,
 } from "lucide-react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
 import {
   Line,
   LineChart,
@@ -19,6 +19,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { AuditManagerWidget } from "@/components/report/AuditManagerWidget";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAudit } from "@/context/AuditContext";
 
@@ -113,7 +114,15 @@ function ReportContent() {
   const searchParams = useSearchParams();
   const isDemo = searchParams.get("demo") === "1";
 
-  const { buildingInfo, reportMarkdown, analysisResults, anomalies, recommendations, auditWarnings } = useAudit();
+  const {
+    buildingInfo,
+    reportMarkdown,
+    analysisResults,
+    anomalies,
+    recommendations,
+    auditWarnings,
+    auditId,
+  } = useAudit();
 
   useEffect(() => {
     if (!isDemo && !reportMarkdown && !analysisResults && typeof window !== "undefined") {
@@ -195,30 +204,40 @@ function ReportContent() {
           </button>
         </div>
 
-        <div className="flex gap-6">
-          <div className="hidden w-60 shrink-0 lg:block print:hidden">
+        <div className="flex flex-col gap-6 lg:flex-row">
+          <div className="w-full shrink-0 print:hidden lg:w-60">
             <GlassCard className="sticky top-28 rounded-[2rem]">
-              <div className="space-y-1">
-                {reportSections.map((section, index) => (
-                  <div
-                    key={section.num}
-                    className={[
-                      "rounded-[1rem] px-4 py-3 text-sm transition-colors",
-                      index === 0 ? "bg-[var(--accent-blue-dim)] text-mid-navy" : "text-[var(--text-secondary)]",
-                    ].join(" ")}
-                  >
-                    <div className="font-mono text-[0.64rem] uppercase tracking-[0.16em]">{section.num}</div>
-                    <div className="mt-1 font-medium">{section.label}</div>
-                  </div>
-                ))}
+              <div className="report-sidebar-toc flex min-h-0 w-full flex-col gap-5">
+                <nav className="space-y-1" aria-label="Report sections">
+                  {reportSections.map((section, index) => (
+                    <div
+                      key={section.num}
+                      className={[
+                        "rounded-[1rem] px-4 py-3 text-sm transition-colors",
+                        index === 0 ? "bg-[var(--accent-blue-dim)] text-mid-navy" : "text-[var(--text-secondary)]",
+                      ].join(" ")}
+                    >
+                      <div className="font-mono text-[0.64rem] uppercase tracking-[0.16em]">{section.num}</div>
+                      <div className="mt-1 font-medium">{section.label}</div>
+                    </div>
+                  ))}
+                </nav>
+                <button type="button" onClick={() => window.print()} className="btn-primary w-full shrink-0">
+                  Download PDF
+                </button>
+                <hr className="w-full border-t-2 border-white/20" />
+                <div className="report-assistant-below-download w-full min-w-0 shrink-0 overflow-visible">
+                  <AuditManagerWidget
+                    reportMarkdown={markdown}
+                    buildingAddress={address}
+                    sessionKey={isDemo ? "demo" : auditId ?? "no-audit-id"}
+                  />
+                </div>
               </div>
-              <button type="button" onClick={() => window.print()} className="btn-primary mt-5 w-full">
-                Download PDF
-              </button>
             </GlassCard>
           </div>
 
-          <div className="flex-1 space-y-6">
+          <div className="min-w-0 flex-1 space-y-6">
             <GlassCard strong className="rounded-[2rem]">
               <div className="text-center">
                 <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent-green-dim)] text-success">
@@ -314,7 +333,7 @@ function ReportContent() {
                 <div className="font-heading text-[1.35rem] font-bold tracking-[-0.05em] text-navy">04 · Financial model</div>
               </div>
               <div className="h-[18rem] min-h-0 min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <LineChart data={financialData}>
                     <XAxis
                       dataKey="year"

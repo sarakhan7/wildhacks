@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname localhost",
+    "dev:webpack": "next dev --hostname localhost --webpack",
     "backend:dev": "./.venv/bin/uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000",
     "backend:start": "./.venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000",
     "build": "next build",
@@ -11,6 +12,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@elevenlabs/convai-widget-embed": "^0.11.3",
     "@google/generative-ai": "^0.24.1",
     "@types/three": "^0.183.1",
     "framer-motion": "^12.38.0",

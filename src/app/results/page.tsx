@@ -147,7 +147,7 @@ export default function ResultsDashboard() {
               </div>
 
               <div className="h-[18rem] w-full min-h-0 min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart data={chartData}>
                     <XAxis
                       dataKey="month"

@@ -59,6 +59,10 @@
   --font-main: "Inter", sans-serif;
   --font-heading: "Space Grotesk", sans-serif;
   --font-mono: "DM Mono", monospace;
+
+  /* Force ElevenLabs internal math to 0 */
+  --el-overlay-padding: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
 }
 
 @theme inline {
@@ -416,6 +420,13 @@ img {
 
 .markdown-report strong {
   color: var(--text-primary);
+}
+
+/* Hides the auto-injected global widget attached to the body */
+body > elevenlabs-convai {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
 }
 
 ::-webkit-scrollbar {
