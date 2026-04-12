@@ -1,9 +1,13 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { motion } from "framer-motion";
 
 import { AuditTerminal } from "@/components/site/AuditTerminal";
 import { TypewriterCycle } from "@/components/ui/TypewriterCycle";
+import { AnimateIn, StaggerGrid, StaggerItem } from "@/components/ui/AnimateIn";
 
 const stats = [
   { value: "$15K–$50K", label: "Traditional audit cost" },
@@ -96,6 +100,7 @@ const terminalLines = [
 export default function Home() {
   return (
     <main className="relative overflow-hidden">
+      {/* ─── Hero ─────────────────────────────────────────── */}
       <section className="relative min-h-screen overflow-hidden">
         <div className="hero-cloud left-[-4%] top-[10%] h-[16rem] w-[24rem] opacity-60" />
         <div className="hero-cloud right-[6%] top-[9%] h-[14rem] w-[22rem] opacity-45" />
@@ -116,8 +121,14 @@ export default function Home() {
 
         <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-6 pb-20 pt-20 sm:pt-24">
           <div className="grid flex-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(360px,560px)] lg:items-center">
+            {/* Heading + CTA */}
             <div className="max-w-3xl pt-0 lg:pt-10">
-              <h1 className="display-title max-w-4xl text-white [text-shadow:0_6px_32px_rgba(0,0,0,0.28)]">
+              <motion.h1
+                className="display-title max-w-4xl text-white [text-shadow:0_6px_32px_rgba(0,0,0,0.28)]"
+                initial={{ opacity: 0, y: 32 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+              >
                 Your building
                 <br />
                 is wasting
@@ -131,38 +142,59 @@ export default function Home() {
                     <span className="ml-[-0.04em]"> a year.</span>
                   </span>
                 </span>
-              </h1>
+              </motion.h1>
 
-              <p className="mt-7 max-w-2xl text-lg font-light leading-relaxed text-white/72">
+              <motion.p
+                className="mt-7 max-w-2xl text-lg font-light leading-relaxed text-white/72"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1], delay: 0.18 }}
+              >
                 Upload 12 months of utility bills. Get a full prioritized energy audit with savings estimates
                 automatically. No engineer. No invoice.
-              </p>
+              </motion.p>
 
-              <div className="mt-10 flex flex-wrap gap-4">
+              <motion.div
+                className="mt-10 flex flex-wrap gap-4"
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1], delay: 0.32 }}
+              >
                 <Link
                   href="/audit"
                   className="btn-secondary border-white/35 bg-white/12 px-8 py-4 text-[1rem] text-white hover:bg-white/20"
                 >
                   Run the live demo <ArrowRight className="h-4 w-4" />
                 </Link>
-              </div>
+              </motion.div>
             </div>
 
-            <div className="flex items-center justify-center lg:justify-end lg:pt-10">
+            {/* Terminal */}
+            <motion.div
+              className="flex items-center justify-center lg:justify-end lg:pt-10"
+              initial={{ opacity: 0, x: 28 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1], delay: 0.22 }}
+            >
               <AuditTerminal lines={terminalLines} title="350 Fifth Ave · audit complete" />
-            </div>
+            </motion.div>
           </div>
 
-          <div className="mt-10 grid gap-4 pb-6 md:grid-cols-3">
+          {/* Stats bar */}
+          <StaggerGrid className="mt-10 grid gap-4 pb-6 md:grid-cols-3">
             {stats.map((stat) => (
-              <div key={stat.label} className="glass-strong rounded-[1.9rem] px-8 py-10 text-center">
-                <div className="font-heading text-[2rem] font-extrabold tracking-[-0.05em] text-navy">{stat.value}</div>
-                <div className="mt-2 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                  {stat.label}
+              <StaggerItem key={stat.label}>
+                <div className="glass-strong rounded-[1.9rem] px-8 py-10 text-center">
+                  <div className="stat-value font-heading text-[2rem] font-extrabold tracking-[-0.05em] text-navy">
+                    {stat.value}
+                  </div>
+                  <div className="mt-2 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    {stat.label}
+                  </div>
                 </div>
-              </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerGrid>
         </div>
 
         <div className="absolute bottom-9 right-8 z-10 hidden flex-col items-center gap-2 lg:flex">
@@ -173,66 +205,86 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ─── How it works ──────────────────────────────────── */}
       <section id="how-it-works" className="relative z-10 mx-auto max-w-6xl px-6 py-20">
-        <div className="text-center">
+        <AnimateIn className="text-center">
           <span className="eyebrow">How it works</span>
           <h2 className="section-title mt-4 text-navy">
             Four steps.
-            <span className="block text-mid-navy">Zero effort.</span>
+            <span className="block title-accent">Zero effort.</span>
           </h2>
-        </div>
+        </AnimateIn>
 
-        <div className="mt-12 grid gap-5 md:grid-cols-2">
+        <StaggerGrid className="mt-12 grid gap-5 md:grid-cols-2">
           {steps.map((step) => (
-            <div key={step.num} className="glass rounded-[1.7rem] p-7 transition-transform duration-200 hover:-translate-y-1">
-              <div className="font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy/70">
-                {step.num} · {step.tag}
+            <StaggerItem key={step.num}>
+              <div className="glass rounded-[1.7rem] p-7 hover:-translate-y-1">
+                <div className="font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy/70">
+                  {step.num} · {step.tag}
+                </div>
+                <h3 className="mt-3 font-heading text-[1.35rem] font-bold uppercase tracking-[-0.04em] text-navy">
+                  {step.title}
+                </h3>
+                <p className="mt-3 text-[0.98rem] leading-7 text-[var(--text-secondary)]">{step.desc}</p>
               </div>
-              <h3 className="mt-3 font-heading text-[1.35rem] font-bold uppercase tracking-[-0.04em] text-navy">
-                {step.title}
-              </h3>
-              <p className="mt-3 text-[0.98rem] leading-7 text-[var(--text-secondary)]">{step.desc}</p>
-            </div>
+            </StaggerItem>
           ))}
-        </div>
+        </StaggerGrid>
       </section>
 
+      {/* ─── Features ──────────────────────────────────────── */}
       <section id="features" className="relative z-10 mx-auto max-w-6xl px-6 py-10 pb-24">
-        <div className="text-center">
+        <AnimateIn className="text-center">
           <span className="eyebrow">What you get</span>
           <h2 className="section-title mt-4 text-navy">
             Everything.
-            <span className="block text-mid-navy">Automated.</span>
+            <span className="block title-accent">Automated.</span>
           </h2>
-        </div>
+        </AnimateIn>
 
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <StaggerGrid className="mt-12 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {features.map((feature) => (
-            <div key={feature.num} className="glass rounded-[1.7rem] p-7 transition-transform duration-200 hover:-translate-y-1">
-              <div className="font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy/70">
-                {feature.num} · {feature.tag}
+            <StaggerItem key={feature.num}>
+              <div className="glass rounded-[1.7rem] p-7 hover:-translate-y-1">
+                <div className="font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy/70">
+                  {feature.num} · {feature.tag}
+                </div>
+                <h3 className="mt-3 font-heading text-[1.18rem] font-bold uppercase tracking-[-0.04em] text-navy">
+                  {feature.title}
+                </h3>
+                <p className="mt-3 text-[0.95rem] leading-7 text-[var(--text-secondary)]">{feature.desc}</p>
               </div>
-              <h3 className="mt-3 font-heading text-[1.18rem] font-bold uppercase tracking-[-0.04em] text-navy">
-                {feature.title}
-              </h3>
-              <p className="mt-3 text-[0.95rem] leading-7 text-[var(--text-secondary)]">{feature.desc}</p>
-            </div>
+            </StaggerItem>
           ))}
-        </div>
+        </StaggerGrid>
       </section>
 
+      {/* ─── CTA / Footer ──────────────────────────────────── */}
       <section className="relative overflow-hidden bg-[var(--gradient-footer)]">
-        <div className="mx-auto max-w-5xl px-6 py-20 text-center text-white">
-          <h2 className="section-title text-navy">
-            Stop guessing.
-            <span className="block text-mid-navy">Start saving.</span>
-          </h2>
-          <p className="mx-auto mt-6 max-w-2xl text-lg font-light leading-8 text-navy">
-            Upload your bills and let AuditAI do the rest.
-          </p>
-          <div className="mt-16 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy">
-            © 2026 AuditAI · Free automated energy audits
-          </div>
+        {/* Radial glow accent */}
+        <div className="footer-glow pointer-events-none absolute inset-0" />
+
+        <div className="relative mx-auto max-w-5xl px-6 py-24 text-center">
+          <AnimateIn>
+            <h2 className="section-title text-white">
+              Stop guessing.
+              <span className="block text-[var(--light-blue)]">Start saving.</span>
+            </h2>
+            <p className="mx-auto mt-6 max-w-xl text-lg font-light leading-8 text-white/65">
+              Upload your bills and let AuditAI do the rest. Free, instant, no engineer required.
+            </p>
+            <div className="mt-10 flex justify-center">
+              <Link
+                href="/audit"
+                className="btn-primary bg-white px-8 py-4 text-[1rem] text-navy hover:bg-white/90"
+              >
+                Run a free audit <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+            <div className="mt-16 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-white/30">
+              © 2026 AuditAI · Free automated energy audits
+            </div>
+          </AnimateIn>
         </div>
       </section>
     </main>

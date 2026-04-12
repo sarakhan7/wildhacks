@@ -146,6 +146,39 @@ img {
   border: 1px solid var(--border-subtle);
   border-radius: 24px;
   box-shadow: var(--shadow-card);
+  position: relative;
+  overflow: hidden;
+  transition:
+    box-shadow 260ms ease,
+    border-color 260ms ease,
+    transform 200ms ease;
+}
+
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    transparent 50%
+  );
+  opacity: 0;
+  transition: opacity 260ms ease;
+  pointer-events: none;
+}
+
+.glass:hover::before {
+  opacity: 1;
+}
+
+.glass:hover {
+  border-color: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    var(--shadow-card),
+    0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 12px 40px rgba(58, 110, 146, 0.14);
 }
 
 .glass-strong {
@@ -250,11 +283,23 @@ img {
 }
 
 .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--accent-cyan);
+}
+
+.eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 1.6rem;
+  height: 1.5px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--mid-navy));
+  border-radius: 999px;
 }
 
 .display-title {
@@ -434,6 +479,38 @@ img {
 ::-webkit-scrollbar-thumb {
   background: rgba(14, 28, 42, 0.2);
   border-radius: 999px;
+}
+
+/* ─── Footer glow ─────────────────────────────────────── */
+.footer-glow {
+  background: radial-gradient(
+    ellipse 70% 55% at 50% 60%,
+    rgba(58, 110, 146, 0.22) 0%,
+    transparent 70%
+  );
+}
+
+/* ─── Gradient section title accent ──────────────────── */
+.title-accent {
+  background: linear-gradient(135deg, var(--mid-navy) 0%, var(--accent-cyan) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ─── Stat card number pulse on hover ────────────────── */
+@keyframes number-glow {
+  0%,
+  100% {
+    text-shadow: none;
+  }
+  50% {
+    text-shadow: 0 0 24px rgba(74, 159, 212, 0.35);
+  }
+}
+
+.stat-value:hover {
+  animation: number-glow 1.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
