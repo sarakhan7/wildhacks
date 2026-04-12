@@ -1320,6 +1320,25 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
   const pointEntranceValues: number[] = [];
   const pointSizes: number[] = [];
 
+  const buildingCenter = exteriorEdges.reduce(
+    (acc, edge) => {
+      const midpoint = {
+        x: (edge.start.x + edge.end.x) * 0.5,
+        z: (edge.start.z + edge.end.z) * 0.5,
+      };
+      return {
+        x: acc.x + midpoint.x * edge.length,
+        z: acc.z + midpoint.z * edge.length,
+        weight: acc.weight + edge.length,
+      };
+    },
+    { x: 0, z: 0, weight: 0 },
+  );
+  const shellCenter =
+    buildingCenter.weight > 0
+      ? { x: buildingCenter.x / buildingCenter.weight, z: buildingCenter.z / buildingCenter.weight }
+      : { x: 0, z: 0 };
+
   const candidateEdges = exteriorEdges
     .filter((edge) => edge.length >= 2.5 && (edge.emitterWeight >= 0.04 || edge.hotspots.length > 0))
     .sort((a, b) => b.emitterWeight * b.length + b.entranceWeight - (a.emitterWeight * a.length + a.entranceWeight));
@@ -1368,10 +1387,38 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
           baseAnchor.z + edge.tangent.z * (nearSpread + tangentJitter * 0.4) + edge.normal.z * 0.38,
         );
 
+        const radialVector = {
+          x: start.x - shellCenter.x,
+          z: start.z - shellCenter.z,
+        };
+        const radialLength = Math.hypot(radialVector.x, radialVector.z);
+        const radialDirection =
+          radialLength > 1e-5
+            ? { x: radialVector.x / radialLength, z: radialVector.z / radialLength }
+            : edge.normal;
+        const angularBias = seededNoise(seed + 6.2) * Math.PI * 2;
+        const fanDirection = {
+          x: Math.cos(angularBias),
+          z: Math.sin(angularBias),
+        };
+        const primaryDirection = {
+          x: radialDirection.x * 0.58 + edge.normal.x * 0.62 + fanDirection.x * 0.44,
+          z: radialDirection.z * 0.58 + edge.normal.z * 0.62 + fanDirection.z * 0.44,
+        };
+        const primaryLength = Math.hypot(primaryDirection.x, primaryDirection.z);
+        const flowDirection =
+          primaryLength > 1e-5
+            ? { x: primaryDirection.x / primaryLength, z: primaryDirection.z / primaryLength }
+            : edge.normal;
+        const lateralDirection = {
+          x: -flowDirection.z,
+          z: flowDirection.x,
+        };
+
         const lift = 6.8 + localHeat * 14.5 + entranceInfluence * 7.4;
         const reach = 16.0 + localHeat * 26.0 + entranceInfluence * 16.0;
-        const swirl = (5.0 + localHeat * 9.5 + entranceInfluence * 6.5) * swirlDirection;
-        const crosswind = (seededNoise(seed + 4.4) - 0.5) * (10.0 + localHeat * 11.0 + entranceInfluence * 8.0);
+        const swirl = (7.0 + localHeat * 11.5 + entranceInfluence * 7.5) * swirlDirection;
+        const crosswind = (seededNoise(seed + 4.4) - 0.5) * (14.0 + localHeat * 13.0 + entranceInfluence * 10.0);
         const dissipation = 0.6 + seededNoise(seed + 4.9) * 0.22;
         const endLift = lift * (1.22 + outletBias * 0.48);
         const farOffset = reach * (1.05 + seededNoise(seed + 5.3) * 0.42);
@@ -1379,24 +1426,24 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
         const guidePoints = [
           start,
           new THREE.Vector3(
-            start.x + edge.normal.x * (4.2 + localHeat * 2.8) + edge.tangent.x * (tangentJitter + swirl * 0.22),
+            start.x + flowDirection.x * (5.0 + localHeat * 3.2) + lateralDirection.x * (tangentJitter + swirl * 0.22),
             facadeY + 1.6 + lift * 0.16,
-            start.z + edge.normal.z * (4.2 + localHeat * 2.8) + edge.tangent.z * (tangentJitter + swirl * 0.22),
+            start.z + flowDirection.z * (5.0 + localHeat * 3.2) + lateralDirection.z * (tangentJitter + swirl * 0.22),
           ),
           new THREE.Vector3(
-            start.x + edge.normal.x * (10.5 + localHeat * 6.0) + edge.tangent.x * (swirl * 0.85 + crosswind * 0.18),
+            start.x + flowDirection.x * (12.5 + localHeat * 7.6) + lateralDirection.x * (swirl * 0.85 + crosswind * 0.18),
             facadeY + 3.5 + lift * 0.34,
-            start.z + edge.normal.z * (10.5 + localHeat * 6.0) + edge.tangent.z * (swirl * 0.85 + crosswind * 0.18),
+            start.z + flowDirection.z * (12.5 + localHeat * 7.6) + lateralDirection.z * (swirl * 0.85 + crosswind * 0.18),
           ),
           new THREE.Vector3(
-            start.x + edge.normal.x * (farOffset * 0.48) + edge.tangent.x * (swirl * 1.25 + crosswind * 0.52),
+            start.x + flowDirection.x * (farOffset * 0.48) + lateralDirection.x * (swirl * 1.25 + crosswind * 0.52),
             facadeY + 6.8 + lift * 0.68,
-            start.z + edge.normal.z * (farOffset * 0.48) + edge.tangent.z * (swirl * 1.25 + crosswind * 0.52),
+            start.z + flowDirection.z * (farOffset * 0.48) + lateralDirection.z * (swirl * 1.25 + crosswind * 0.52),
           ),
           new THREE.Vector3(
-            start.x + edge.normal.x * farOffset + edge.tangent.x * (swirl * 0.92 + crosswind + tangentJitter * 0.45),
+            start.x + flowDirection.x * farOffset + lateralDirection.x * (swirl * 0.92 + crosswind + tangentJitter * 0.45),
             facadeY + endLift,
-            start.z + edge.normal.z * farOffset + edge.tangent.z * (swirl * 0.92 + crosswind + tangentJitter * 0.45),
+            start.z + flowDirection.z * farOffset + lateralDirection.z * (swirl * 0.92 + crosswind + tangentJitter * 0.45),
           ),
         ];
 
@@ -1495,8 +1542,8 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
         vec3 color = mix(smoke, deepRed, smoothstep(0.36, 0.0, vProgress));
         color = mix(color, hotRed, 0.42 + shimmer * 0.18);
         color = mix(color, ember, pulse * 0.42 + vEntrance * 0.16);
-        float alpha = (0.04 + vIntensity * 0.12 + vEntrance * 0.04) * core * dissipate * farFade;
-        alpha += pulse * (0.04 + vIntensity * 0.04) * farFade;
+        float alpha = (0.08 + vIntensity * 0.18 + vEntrance * 0.06) * core * dissipate * farFade;
+        alpha += pulse * (0.06 + vIntensity * 0.06) * farFade;
         gl_FragColor = vec4(color, alpha * uVisible);
       }
     `,
@@ -1784,14 +1831,9 @@ export default function MapboxThreeScene({
       data.building.lng,
       data.building.lat,
     );
-    const { meshes: wallMeshes, uniforms: wallUniforms, textures: wallTextures } = buildWallMeshes(
-      exteriorEdges,
-      thermalSurfaces,
-    );
-    layerState.wallMeshes = wallMeshes;
-    layerState.wallUniforms = wallUniforms;
-    layerState.wallThermalTextures = wallTextures;
-    wallMeshes.forEach((mesh) => layerState.scene?.add(mesh));
+    layerState.wallMeshes = [];
+    layerState.wallUniforms = [];
+    layerState.wallThermalTextures = {};
 
     const { points, uniforms: particleUniforms } = createParticleSystem(exteriorEdges);
     points.userData.visualization = true;
@@ -1799,7 +1841,7 @@ export default function MapboxThreeScene({
     layerState.particleUniforms = particleUniforms;
     layerState.scene.add(points);
 
-    layerState.hoverables = [...roofMeshes, ...wallMeshes];
+    layerState.hoverables = [...roofMeshes];
   }, [data, roofCalibration, roofGrids, thermalSurfaces]);
 
   useEffect(() => {
