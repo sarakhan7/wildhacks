@@ -207,6 +207,37 @@ def _build_structured_pdf_reading(
             notes.append(f"Parsed address: {strings[1]}")
         return reading, notes
 
+    demo_month = fields.get("Billing Month")
+    if demo_month and nw_kwh and nw_therms:
+        month = _parse_month_name(demo_month, _infer_demo_year(document.filename))
+        if month is None:
+            return None, []
+
+        total_charges = _parse_inline_currency(strings, "Total Charges:")
+        electric_total = _parse_number(fields.get("Electric Total ($)")) or 0.0
+        gas_total = _parse_number(fields.get("Gas Total ($)")) or 0.0
+        cost = total_charges if total_charges is not None else electric_total + gas_total
+
+        reading = OCRReading(
+            month=month,
+            kwh=_parse_number(nw_kwh) or 0.0,
+            therms=_parse_number(nw_therms) or 0.0,
+            peak_kw=_parse_number(fields.get("Peak Demand (kW)")),
+            cost=cost,
+            confidence=0.99,
+            source_document_id=document.document_id,
+            source_pages=[1],
+            extraction_notes=["Structured PDF text parser extracted simplified Northwestern demo utility statement fields."],
+        )
+
+        notes = [
+            "Parsed embedded PDF text directly; OCR was not required.",
+            "Detected simplified demo utility statement format.",
+        ]
+        if len(strings) > 1:
+            notes.append(f"Parsed address: {strings[1]}")
+        return reading, notes
+
     return None, []
 
 
@@ -217,6 +248,7 @@ def _extract_label_value_pairs(strings: list[str]) -> dict[str, str]:
         "Address:",
         "Billing Period:",
         "Billing Period",
+        "Billing Month",
         "Meter Number:",
         "Electric Usage (kWh)",
         "Usage (kWh)",
@@ -242,6 +274,35 @@ def _parse_billing_month(period_text: str) -> str | None:
     end_date = matches[-1]
     month, _day, year = end_date.split("/")
     return f"{year}-{month}"
+
+
+def _parse_month_name(month_text: str, default_year: int) -> str | None:
+    normalized = month_text.strip().lower()
+    month_map = {
+        "january": "01",
+        "february": "02",
+        "march": "03",
+        "april": "04",
+        "may": "05",
+        "june": "06",
+        "july": "07",
+        "august": "08",
+        "september": "09",
+        "october": "10",
+        "november": "11",
+        "december": "12",
+    }
+    month = month_map.get(normalized)
+    if month is None:
+        return None
+    return f"{default_year}-{month}"
+
+
+def _infer_demo_year(filename: str) -> int:
+    match = re.search(r"(20\d{2})", filename)
+    if match:
+        return int(match.group(1))
+    return 2025
 
 
 def _parse_number(value: str | None) -> float | None:
