@@ -27,14 +27,14 @@ type RoofCalibration = {
   flipY: boolean;
 };
 
-const STORAGE_AUDIT_ID = "auditai.last-visualization-audit-id";
-const STORAGE_CALIBRATION = "auditai.dev.roof-calibration";
-const STORAGE_PAYLOAD_PREFIX = "auditai.visualization-payload:";
+const STORAGE_AUDIT_ID = "architec.last-visualization-audit-id";
+const STORAGE_CALIBRATION = "architec.dev.roof-calibration";
+const STORAGE_PAYLOAD_PREFIX = "architec.visualization-payload:v2:";
 const DEFAULT_CALIBRATION: RoofCalibration = {
-  offsetX: 0.074,
-  offsetY: -0.044,
-  scaleX: 0.55,
-  scaleY: 0.55,
+  offsetX: 0,
+  offsetY: -0.088,
+  scaleX: 1,
+  scaleY: 1,
   flipX: false,
   flipY: false,
 };
@@ -46,7 +46,7 @@ export default function VisualizationDevPage() {
   const [data, setData] = useState<VisualizationSceneResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [overlay, setOverlay] = useState<VisualizationOverlayMode>("both");
+  const [overlay, setOverlay] = useState<VisualizationOverlayMode>("solar");
   const [particlesEnabled, setParticlesEnabled] = useState(true);
   const [roofCalibration, setRoofCalibration] = useState<RoofCalibration>(DEFAULT_CALIBRATION);
   const [reloadNonce, setReloadNonce] = useState(0);

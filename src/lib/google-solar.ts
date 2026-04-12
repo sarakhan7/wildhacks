@@ -1,6 +1,8 @@
 import "server-only";
 
 import { fromArrayBuffer } from "geotiff";
+import geokeysToProj4 from "geotiff-geokeys-to-proj4";
+import proj4 from "proj4";
 
 import type { AuditResultsBundle } from "@/lib/audit-api";
 import type {
@@ -62,12 +64,14 @@ type SolarRaster = {
   width: number;
   height: number;
   bands: number[][];
+  bounds: GeoBounds | null;
 };
 
 type SolarSource = {
   id: string;
   center: { lat: number; lng: number };
   bounds: GeoBounds;
+  rasterBounds: GeoBounds;
   imageryDate: SolarDate | null;
   imageryProcessedDate: SolarDate | null;
   roofStats: SolarVisualization["roofStats"];
@@ -231,10 +235,72 @@ async function fetchGeoTiffGrid(url: string, key: string): Promise<SolarRaster> 
   const tiff = await fromArrayBuffer(arrayBuffer);
   const image = await tiff.getImage();
   const rasters = await image.readRasters();
+  const rawBounds = image.getBoundingBox();
+  const geoKeys = image.getGeoKeys();
+
+  let bounds: GeoBounds | null = null;
+  if (
+    Array.isArray(rawBounds) &&
+    rawBounds.length === 4 &&
+    rawBounds.every((value) => Number.isFinite(value))
+  ) {
+    const [minX, minY, maxX, maxY] = rawBounds;
+    const directBounds = {
+      west: minX,
+      south: minY,
+      east: maxX,
+      north: maxY,
+    } satisfies GeoBounds;
+
+    if (isReasonableBounds(directBounds)) {
+      bounds = directBounds;
+    } else if (geoKeys) {
+      try {
+        const projection = geokeysToProj4.toProj4(
+          geoKeys as Parameters<typeof geokeysToProj4.toProj4>[0],
+        );
+        const corners = [
+          [minX, minY],
+          [minX, maxY],
+          [maxX, minY],
+          [maxX, maxY],
+        ].map(([x, y]) => {
+          const converted = geokeysToProj4.convertCoordinates(
+            x,
+            y,
+            0,
+            projection.coordinatesConversionParameters,
+          );
+
+          if (projection.isGCS) {
+            return { lng: converted.x, lat: converted.y };
+          }
+
+          const [lng, lat] = proj4(projection.proj4, "EPSG:4326", [converted.x, converted.y]);
+          return { lng, lat };
+        });
+
+        const projectedBounds = {
+          west: Math.min(...corners.map((corner) => corner.lng)),
+          south: Math.min(...corners.map((corner) => corner.lat)),
+          east: Math.max(...corners.map((corner) => corner.lng)),
+          north: Math.max(...corners.map((corner) => corner.lat)),
+        } satisfies GeoBounds;
+
+        if (isReasonableBounds(projectedBounds)) {
+          bounds = projectedBounds;
+        }
+      } catch {
+        bounds = null;
+      }
+    }
+  }
+
   return {
     width: image.getWidth(),
     height: image.getHeight(),
     bands: Array.from(rasters, (band) => Array.from(band as ArrayLike<number>)),
+    bounds,
   };
 }
 
@@ -534,18 +600,15 @@ function buildFallbackSolar(results: AuditResultsBundle): SolarVisualization {
 
 function createInsightKey(insight: BuildingInsightsResponse) {
   const bounds = boundsFromLatLngBox(insight.boundingBox);
-  if (insight.name) {
-    return insight.name;
-  }
-  if (!bounds) {
-    return `${insight.center?.latitude?.toFixed(6) ?? "x"}:${insight.center?.longitude?.toFixed(6) ?? "y"}`;
-  }
-  return [
-    bounds.west.toFixed(5),
-    bounds.south.toFixed(5),
-    bounds.east.toFixed(5),
-    bounds.north.toFixed(5),
-  ].join(":");
+  const boundsKey = bounds
+    ? [
+        bounds.west.toFixed(5),
+        bounds.south.toFixed(5),
+        bounds.east.toFixed(5),
+        bounds.north.toFixed(5),
+      ].join(":")
+    : `${insight.center?.latitude?.toFixed(6) ?? "x"}:${insight.center?.longitude?.toFixed(6) ?? "y"}`;
+  return insight.name ? `${insight.name}:${boundsKey}` : boundsKey;
 }
 
 function generateProbePoints(lat: number, lng: number, bounds: GeoBounds | null) {
@@ -636,16 +699,18 @@ function composeGridForMonth(
 
       sources.forEach((source) => {
         if (
-          lng < source.bounds.west ||
-          lng > source.bounds.east ||
-          lat < source.bounds.south ||
-          lat > source.bounds.north
+          lng < source.rasterBounds.west ||
+          lng > source.rasterBounds.east ||
+          lat < source.rasterBounds.south ||
+          lat > source.rasterBounds.north
         ) {
           return;
         }
 
-        const sourceU = (lng - source.bounds.west) / Math.max(source.bounds.east - source.bounds.west, 1e-9);
-        const sourceV = (lat - source.bounds.south) / Math.max(source.bounds.north - source.bounds.south, 1e-9);
+        const sourceU =
+          (lng - source.rasterBounds.west) / Math.max(source.rasterBounds.east - source.rasterBounds.west, 1e-9);
+        const sourceV =
+          (lat - source.rasterBounds.south) / Math.max(source.rasterBounds.north - source.rasterBounds.south, 1e-9);
         const mask = sampleGrid(source.roofMaskGrid, sourceU, sourceV);
         if (mask <= 0.06) {
           return;
@@ -734,6 +799,10 @@ async function buildSolarSource(insight: BuildingInsightsResponse, key: string):
     fetchGeoTiffGrid(layers.maskUrl, key),
     layers.monthlyFluxUrl ? fetchGeoTiffGrid(layers.monthlyFluxUrl, key) : Promise.resolve(null),
   ]);
+  const rasterBounds = annual.bounds ?? mask.bounds ?? monthly?.bounds ?? bounds;
+  if (!rasterBounds) {
+    return null;
+  }
 
   const maskBand = mask.bands[0];
   const annualFluxGrid = downsampleAndMask(annual.bands[0], annual.width, annual.height, maskBand);
@@ -762,9 +831,10 @@ async function buildSolarSource(insight: BuildingInsightsResponse, key: string):
   );
 
   return {
-    id: insight.name ?? createInsightKey(insight),
+    id: createInsightKey(insight),
     center,
     bounds,
+    rasterBounds,
     imageryDate: layers.imageryDate || insight.imageryDate || null,
     imageryProcessedDate: layers.imageryProcessedDate || insight.imageryProcessedDate || null,
     roofStats: {
@@ -796,7 +866,7 @@ function buildVisualizationFromSources(
   fallbackLat: number,
   fallbackLng: number,
 ): SolarVisualization {
-  const renderBounds = unionBounds(sources.map((source) => source.bounds));
+  const renderBounds = unionBounds(sources.map((source) => source.rasterBounds));
   const { width, height } = getCompositeDimensions(renderBounds);
   const annualComposite = composeGridForMonth(sources, renderBounds, width, height, 0);
   const monthlyComposites = Array.from({ length: 12 }, (_, index) =>

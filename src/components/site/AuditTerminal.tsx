@@ -11,7 +11,7 @@ interface AuditTerminalProps {
 }
 
 export function AuditTerminal({
-  title = "350 Fifth Ave · audit complete",
+  title = "Technological Institute · audit complete",
   lines,
   compact = false,
 }: AuditTerminalProps) {

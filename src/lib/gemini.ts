@@ -7,7 +7,7 @@ import { isProd, loadResponseText, saveRecording } from "@/lib/gemini_fixtures";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 function geminiLogEnabled(): boolean {
-  const v = (process.env.AUDITAI_LOG_GEMINI || "").trim().toLowerCase();
+  const v = (process.env.ARCHITEC_LOG_GEMINI || "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
@@ -23,7 +23,7 @@ function logGeminiEvent(
       safe[k] = `${val.slice(0, 4000)}...(${val.length} chars total)`;
     }
   }
-  console.info("[auditai:gemini]", JSON.stringify(safe));
+  console.info("[architec:gemini]", JSON.stringify(safe));
 }
 
 /**

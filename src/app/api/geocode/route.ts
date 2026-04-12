@@ -185,7 +185,7 @@ async function fetchNominatimFeatures(query: string) {
   const res = await fetch(nominatimUrl, {
     cache: "no-store",
     headers: {
-      "User-Agent": "AuditAI/1.0 (local-dev geocoder fallback)",
+      "User-Agent": "Architec/1.0 (local-dev geocoder fallback)",
       Accept: "application/json",
     },
   });

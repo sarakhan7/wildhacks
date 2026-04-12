@@ -99,6 +99,7 @@ type LayerState = {
   parts: BuildingPart[];
   footprintLimits: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
   hoveredKey: string;
+  didPostSettleRebuild: boolean;
 };
 
 function createEmptyLayerState(): LayerState {
@@ -127,6 +128,7 @@ function createEmptyLayerState(): LayerState {
     parts: [],
     footprintLimits: null,
     hoveredKey: "",
+    didPostSettleRebuild: false,
   };
 }
 
@@ -316,20 +318,20 @@ function resolveFootprints(
     );
 
     const allRings: Array<{ ring: [number, number][]; height: number }> = [];
-    rendered.forEach(f => {
+    rendered.forEach((f) => {
       const parsedHeight = Number(f.properties?.height ?? NaN);
       const parsedBase = Number(f.properties?.min_height ?? 0);
       const h = Number.isFinite(parsedHeight) ? Math.max(0, parsedHeight - parsedBase) : data.building.inferredHeightMeters;
       if (f.geometry && f.geometry.type === "Polygon") {
         allRings.push({ ring: f.geometry.coordinates[0] as [number, number][], height: h });
       } else if (f.geometry && f.geometry.type === "MultiPolygon") {
-        f.geometry.coordinates.forEach(poly => allRings.push({ ring: poly[0] as [number, number][], height: h }));
+        f.geometry.coordinates.forEach((poly) => allRings.push({ ring: poly[0] as [number, number][], height: h }));
       }
     });
 
     const scopedBoundsList =
       data.solar.sourceBuildings.length > 0
-        ? data.solar.sourceBuildings.map((entry) => expandGeoBounds(entry.bounds, 0.05))
+        ? data.solar.sourceBuildings.map((entry) => expandGeoBounds(entry.bounds, 0.018))
         : [expandGeoBounds(data.solar.renderBounds, 0.04)];
     const unfilteredRings = allRings.filter(r => r.ring && r.ring.length >= 3);
     const validRings =
@@ -389,14 +391,9 @@ function resolveFootprints(
           return;
         }
 
-        const centroidDistance = Math.hypot(
-          currentRing.localCentroid.x - candidate.localCentroid.x,
-          currentRing.localCentroid.z - candidate.localCentroid.z,
-        );
         if (
           !ringsConnected(currentRing.ring, candidate.ring) &&
-          !localRingsNear(currentRing.localRing, candidate.localRing) &&
-          centroidDistance > 42
+          !localRingsNear(currentRing.localRing, candidate.localRing, 12)
         ) {
           return;
         }
@@ -1782,9 +1779,17 @@ export default function MapboxThreeScene({
     }
     layerState.parts = parts;
     layerState.footprintLimits = bounds;
-    const shellGeoBounds = localBoundsToGeoBounds(bounds, data.building.lng, data.building.lat);
-    const displayRoofGrids = fitRoofGridsToShell(roofGrids, shellGeoBounds);
+    const displayRoofGrids = roofGrids;
     layerState.displayRoofGrids = displayRoofGrids;
+
+    if (!layerState.didPostSettleRebuild) {
+      layerState.didPostSettleRebuild = true;
+      layerState.map.once("idle", () => {
+        window.setTimeout(() => {
+          rebuildSceneRef.current();
+        }, 180);
+      });
+    }
 
     const roofSolarTexture = createTexture(displayRoofGrids.solarGrid, true);
     const roofObservedTexture = createTexture(displayRoofGrids.observedSolarGrid, true);

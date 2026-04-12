@@ -14,21 +14,21 @@ import { IntroOverlay } from "@/components/site/IntroOverlay";
 const stats = [
   { value: "$15K–$50K", label: "Traditional audit cost" },
   { value: "6 months", label: "Typical timeline" },
-  { value: "10 min · Free", label: "AuditAI" },
+  { value: "10 min · Free", label: "Architec" },
 ];
 
 const steps = [
   {
     num: "01",
-    tag: "upload",
-    title: "Upload your bills",
-    desc: "Drop 12 months of electric and gas bills. AuditAI extracts the key data automatically.",
-  },
-  {
-    num: "02",
     tag: "profile",
     title: "Describe your building",
     desc: "Building type, square footage, operating hours, and major systems. The full setup takes a few minutes.",
+  },
+  {
+    num: "02",
+    tag: "upload",
+    title: "Upload your bills",
+    desc: "Drop 12 months of electric and gas bills. Architec extracts the key data automatically.",
   },
   {
     num: "03",
@@ -39,8 +39,8 @@ const steps = [
   {
     num: "04",
     tag: "report",
-    title: "Get your report",
-    desc: "Receive a prioritized list of upgrades with estimated savings, payback, and next-step guidance.",
+    title: "Interactive 3D Report",
+    desc: "Explore a digital twin with high-fidelity solar heatmaps and volumetric thermal plumes showing energy loss and upgrade potential.",
   },
 ];
 
@@ -77,14 +77,14 @@ const features = [
   },
   {
     num: "06",
-    tag: "report",
-    title: "Full audit report",
-    desc: "Open a presentation-ready report with executive summary, charts, and implementation guidance.",
+    tag: "visualization",
+    title: "3D Digital Twin",
+    desc: "Explore your interactive 3D audit with precision solar potential heatmaps and volumetric plumes showing heat loss.",
   },
 ];
 
 const terminalLines = [
-  { label: "Building", value: "350 Fifth Ave", valueClassName: "text-emerald-400" },
+  { label: "Building", value: "Technological Institute", valueClassName: "text-emerald-400" },
   { label: "Type", value: "Office · Class A", valueClassName: "text-emerald-400" },
   { label: "EUI", value: "89.4 kBtu/ft²", valueClassName: "text-emerald-400" },
   { label: "Rank", value: "73rd percentile", valueClassName: "text-emerald-400" },
@@ -107,7 +107,7 @@ export default function Home() {
 
   // If intro already seen this session, skip the wait
   useEffect(() => {
-    if (sessionStorage.getItem("auditai_intro_seen")) {
+    if (sessionStorage.getItem("architec_intro_seen")) {
       setHeroReady(true);
       setTypewriterReady(true);
     }
@@ -197,7 +197,7 @@ export default function Home() {
               animate={{ opacity: heroReady ? 1 : 0, x: heroReady ? 0 : 28 }}
               transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
             >
-              <AuditTerminal lines={terminalLines} title="350 Fifth Ave · audit complete" />
+              <AuditTerminal lines={terminalLines} title="Technological Institute · audit complete" />
             </motion.div>
           </div>
 
@@ -205,11 +205,11 @@ export default function Home() {
           <StaggerGrid className="mt-10 grid gap-4 pb-6 md:grid-cols-3">
             {stats.map((stat) => (
               <StaggerItem key={stat.label}>
-                <div className="glass-strong rounded-[1.9rem] px-8 py-10 text-center">
-                  <div className="stat-value font-heading text-[2rem] font-extrabold tracking-[-0.05em] text-navy">
+                <div className="glass-dark rounded-[1.9rem] px-8 py-10 text-center">
+                  <div className="stat-value font-heading text-[2rem] font-extrabold tracking-[-0.05em] text-white">
                     {stat.value}
                   </div>
-                  <div className="mt-2 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  <div className="mt-2 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-white/55">
                     {stat.label}
                   </div>
                 </div>
@@ -292,7 +292,7 @@ export default function Home() {
               <span className="block text-[var(--light-blue)]">Start saving.</span>
             </h2>
             <p className="mx-auto mt-6 max-w-xl text-lg font-light leading-8 text-white/65">
-              Upload your bills and let AuditAI do the rest. Free, instant, no engineer required.
+              Upload your bills and let Architec do the rest. Free, instant, no engineer required.
             </p>
             <div className="mt-10 flex justify-center">
               <Link
@@ -303,7 +303,7 @@ export default function Home() {
               </Link>
             </div>
             <div className="mt-16 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-white/30">
-              © 2026 AuditAI · Free automated energy audits
+              © 2026 Architec · Free automated energy audits
             </div>
           </AnimateIn>
         </div>

@@ -43,10 +43,10 @@ function scenarioDisplayLabel(scenario: VisualizationScenario) {
 }
 
 const DEFAULT_ROOF_CALIBRATION = {
-  offsetX: 0.074,
-  offsetY: -0.044,
-  scaleX: 0.55,
-  scaleY: 0.55,
+  offsetX: 0,
+  offsetY: -0.088,
+  scaleX: 1,
+  scaleY: 1,
   flipX: false,
   flipY: false,
 };
@@ -59,7 +59,7 @@ export default function Audit3DView() {
   const [error, setError] = useState("");
   const [hovered, setHovered] = useState<HoverCard | null>(null);
   const scenario: VisualizationScenario = "current";
-  const overlay: VisualizationOverlayMode = "both";
+  const overlay: VisualizationOverlayMode = "solar";
   const month = 0;
   const particlesEnabled = true;
 
@@ -74,7 +74,7 @@ export default function Audit3DView() {
       return;
     }
 
-    window.localStorage.setItem("auditai.last-visualization-audit-id", auditId);
+    window.localStorage.setItem("architec.last-visualization-audit-id", auditId);
 
     let active = true;
     async function loadVisualization() {

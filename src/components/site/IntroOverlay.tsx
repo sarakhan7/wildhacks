@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
  * Plays once per session (sessionStorage). Total duration ~2.3 s.
  */
 
-export const INTRO_SESSION_KEY = "auditai_intro_seen";
+export const INTRO_SESSION_KEY = "architec_intro_seen";
 const EASE = [0.76, 0, 0.24, 1] as const;
 
 function PanelLogo() {

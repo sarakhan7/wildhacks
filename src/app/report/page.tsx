@@ -35,7 +35,7 @@ const demoReportMarkdown = `# Audit Report
 
 ## Executive Summary
 
-350 Fifth Avenue consumes 89.4 kBtu/ft² annually, placing it in the 73rd percentile among comparable office buildings. Annual spend is approximately **$214,000**, and an estimated **$62,000 per year** is avoidable through four prioritized upgrades.
+Technological Institute consumes 89.4 kBtu/ft² annually, placing it in the 73rd percentile among comparable university buildings. Annual spend is approximately **$214,000**, and an estimated **$62,000 per year** is avoidable through four prioritized upgrades.
 
 ## Primary Findings
 
@@ -51,7 +51,7 @@ const demoReportMarkdown = `# Audit Report
 `;
 
 const demoPayload = {
-  address: "350 Fifth Avenue, New York, NY",
+  address: "2145 Sheridan Rd, Evanston, IL 60208",
   totalCost: 214000,
   siteEUI: 89.4,
   percentile: 73,
@@ -257,7 +257,7 @@ function ReportContent() {
               <div className="font-heading text-[1.35rem] font-bold tracking-[-0.05em] text-navy">01 · Executive summary</div>
               <p className="mt-4 text-[0.98rem] leading-8 text-[var(--text-secondary)]">
                 {address || "This property"} uses approximately {siteEUI.toFixed(1)} kBtu/ft² annually and spends about
-                ${annualCost.toLocaleString()} on energy each year. AuditAI identified {activeRecommendations.length} prioritized
+                ${annualCost.toLocaleString()} on energy each year. Architec identified {activeRecommendations.length} prioritized
                 upgrades with roughly ${annualSavings.toLocaleString()} in potential annual savings.
               </p>
 

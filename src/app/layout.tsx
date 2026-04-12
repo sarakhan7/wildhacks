@@ -4,7 +4,7 @@ import { Navbar } from "@/components/ui/Navbar";
 import { AuditProvider } from "@/context/AuditContext";
 
 export const metadata: Metadata = {
-  title: "AuditAI",
+  title: "Architec",
   description: "Free AI-driven commercial building energy audits with benchmarking, anomaly detection, and prioritized savings recommendations.",
 };
 

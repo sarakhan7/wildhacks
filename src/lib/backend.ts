@@ -1,7 +1,7 @@
 import "server-only";
 
 export function getBackendBaseUrl() {
-  return process.env.AUDITAI_BACKEND_URL || "http://127.0.0.1:8000";
+  return process.env.ARCHITEC_BACKEND_URL || "http://127.0.0.1:8000";
 }
 
 export async function proxyToBackend(path: string, init?: RequestInit) {

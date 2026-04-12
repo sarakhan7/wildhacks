@@ -103,7 +103,7 @@ export default function ResultsDashboard() {
             <span className="block text-mid-navy">Exposed.</span>
           </h1>
           <p className="mx-auto mt-5 max-w-3xl text-[1rem] leading-8 text-[var(--text-secondary)]">
-            AuditAI normalized the year, benchmarked the building, and ranked the best paths to savings.
+            Architec normalized the year, benchmarked the building, and ranked the best paths to savings.
           </p>
         </div>
 

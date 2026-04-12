@@ -431,7 +431,7 @@ export default function AuditWizard() {
                             setLocationError("");
                           }
                         }}
-                        placeholder="350 Fifth Avenue, New York, NY"
+                        placeholder="Technological Institute, Northwestern University"
                         className="h-14 w-full rounded-full border border-white/70 bg-white/50 pl-12 pr-5 text-[0.98rem] text-navy outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-white"
                       />
                     </div>
