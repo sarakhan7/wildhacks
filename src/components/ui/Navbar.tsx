@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAudit } from "@/context/AuditContext";
 
 const marketingLinks = [
   { label: "How it works", href: "/#how-it-works" },
@@ -11,7 +12,11 @@ const marketingLinks = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const { auditId } = useAudit();
   const isHome = pathname === "/";
+  const auditInProgress = Boolean(auditId);
+  const auditCtaLabel =
+    pathname === "/audit" && auditInProgress ? "Continue audit" : "Start audit";
 
   return (
     <header className="pointer-events-none fixed inset-x-0 top-5 z-50 px-4 sm:px-6">
@@ -45,7 +50,7 @@ export function Navbar() {
             </Link>
           )}
           <Link href="/audit" className="btn-primary px-5 py-3 text-sm">
-            {pathname === "/audit" ? "Continue audit" : "Start audit"}
+            {auditCtaLabel}
           </Link>
         </div>
       </div>

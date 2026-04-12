@@ -2,8 +2,29 @@
  * Gemini API helpers for OCR and report generation.
  */
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { isProd, loadResponseText, saveRecording } from "@/lib/gemini_fixtures";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+
+function geminiLogEnabled(): boolean {
+  const v = (process.env.AUDITAI_LOG_GEMINI || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+function logGeminiEvent(
+  operation: string,
+  phase: string,
+  fields: Record<string, unknown>
+): void {
+  if (!geminiLogEnabled()) return;
+  const safe: Record<string, unknown> = { operation, phase, ...fields };
+  for (const [k, val] of Object.entries(safe)) {
+    if (typeof val === "string" && val.length > 4000) {
+      safe[k] = `${val.slice(0, 4000)}...(${val.length} chars total)`;
+    }
+  }
+  console.info("[auditai:gemini]", JSON.stringify(safe));
+}
 
 /**
  * Extract utility data from a bill image using Gemini Vision.
@@ -12,13 +33,8 @@ export async function extractUtilityData(
   imageBase64: string,
   mimeType: string
 ): Promise<ExtractedReading[]> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.0-flash",
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-    },
-  });
+  const modelId = "gemini-3.0-flash";
+  const operation = "next.extractUtilityData";
 
   const prompt = `You are an expert utility bill data extractor. Analyze this utility bill image and extract ALL billing periods shown.
 
@@ -44,26 +60,75 @@ IMPORTANT:
 - Always include the total cost including all charges and fees
 - Be precise with numbers — do not estimate or round`;
 
-  const result = await model.generateContent([
-    prompt,
-    {
-      inlineData: {
-        mimeType,
-        data: imageBase64,
+  let text: string;
+  if (!isProd()) {
+    text = await loadResponseText(operation);
+    logGeminiEvent(operation, "playback", {
+      model: modelId,
+      responseTextChars: text.length,
+    });
+  } else {
+    const model = genAI.getGenerativeModel({
+      model: modelId,
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
       },
-    },
-  ]);
-
-  const text = result.response.text();
+    });
+    logGeminiEvent(operation, "request", {
+      model: modelId,
+      mimeType,
+      inlineDataBase64Chars: imageBase64.length,
+      promptChars: prompt.length,
+      promptPreview: prompt.slice(0, 500),
+      generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+    });
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          mimeType,
+          data: imageBase64,
+        },
+      },
+    ]);
+    text = result.response.text();
+    logGeminiEvent(operation, "response_raw", {
+      model: modelId,
+      responseTextChars: text.length,
+      responseTextPreview: text.slice(0, 2000),
+    });
+    await saveRecording(operation, {
+      model: modelId,
+      request_summary: {
+        mimeType,
+        inlineDataBase64Chars: imageBase64.length,
+        prompt,
+        generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+      },
+      response_text: text,
+    });
+  }
 
   try {
     const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : [parsed];
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    logGeminiEvent(operation, "response_parsed", {
+      model: modelId,
+      readingsCount: rows.length,
+    });
+    return rows;
   } catch {
     // Try to extract JSON from markdown code block
     const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (match) {
-      return JSON.parse(match[1]);
+      const raw = JSON.parse(match[1]) as unknown;
+      const normalized = (Array.isArray(raw) ? raw : [raw]) as ExtractedReading[];
+      logGeminiEvent(operation, "response_parsed_codeblock", {
+        model: modelId,
+        readingsCount: normalized.length,
+      });
+      return normalized;
     }
     throw new Error("Failed to parse OCR response: " + text.substring(0, 200));
   }
@@ -81,13 +146,8 @@ export interface ExtractedReading {
  * Generate the full audit report using Gemini Pro.
  */
 export async function generateAuditReport(context: AuditReportContext): Promise<string> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.0-pro",
-    generationConfig: {
-      temperature: 0.3,
-      maxOutputTokens: 8192,
-    },
-  });
+  const modelId = "gemini-3.0-pro";
+  const operation = "next.generateAuditReport";
 
   const prompt = `You are a licensed Professional Engineer (PE) with 20 years of experience conducting ASHRAE Level II commercial building energy audits. You have deep expertise in HVAC systems, building envelope analysis, energy modeling, and financial analysis of Energy Conservation Measures (ECMs).
 
@@ -154,8 +214,48 @@ For each recommended ECM, include:
 - Write in professional but accessible language suitable for a building owner (not an engineer).
 - Use markdown headers, bullet points, and emphasis for readability.`;
 
+  if (!isProd()) {
+    const markdown = await loadResponseText(operation);
+    logGeminiEvent(operation, "playback", {
+      model: modelId,
+      responseTextChars: markdown.length,
+    });
+    return markdown;
+  }
+
+  const model = genAI.getGenerativeModel({
+    model: modelId,
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 8192,
+    },
+  });
+
+  logGeminiEvent(operation, "request", {
+    model: modelId,
+    promptChars: prompt.length,
+    promptPreview: prompt.slice(0, 1200),
+    contextJsonChars: JSON.stringify(context).length,
+    generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+  });
+
   const result = await model.generateContent(prompt);
-  return result.response.text();
+  const markdown = result.response.text();
+  logGeminiEvent(operation, "response_raw", {
+    model: modelId,
+    responseTextChars: markdown.length,
+    responseTextPreview: markdown.slice(0, 2000),
+  });
+  await saveRecording(operation, {
+    model: modelId,
+    request_summary: {
+      prompt,
+      context,
+      generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+    },
+    response_text: markdown,
+  });
+  return markdown;
 }
 
 export interface AuditReportContext {

@@ -7,6 +7,10 @@ from urllib import error, request
 
 from ..analytics.financials import build_financial_projection
 from ..analytics.prism import KWH_TO_KBTU, THERMS_TO_KBTU
+from ..config import settings
+from .gemini_fixtures import load_response_text, save_recording
+from .gemini_io import log_gemini_event
+
 from ..schemas import (
     AnalysisResults,
     AuditReportArtifact,
@@ -75,7 +79,7 @@ class ReasoningService:
         peer: PeerClusterAssignment,
         anomalies: list[ChangepointSignal],
     ) -> list[DiagnosticHypothesis]:
-        if self.gemini_api_key:
+        if self.gemini_api_key or not settings.prod:
             try:
                 return self._diagnose_with_gemini(building, analysis, peer, anomalies)
             except Exception:
@@ -93,7 +97,7 @@ class ReasoningService:
     ) -> tuple[list[ECMRecommendation], list[FinancialProjection]]:
         candidates = _build_candidate_measures(building, analysis, peer, hypotheses, anomalies)
         selected = None
-        if self.gemini_api_key and candidates:
+        if candidates and (self.gemini_api_key or not settings.prod):
             try:
                 selected = self._select_recommendations_with_gemini(building, analysis, peer, hypotheses, anomalies, candidates)
             except Exception:
@@ -124,7 +128,7 @@ class ReasoningService:
         recommendations: list[ECMRecommendation],
         financials: list[FinancialProjection],
     ) -> AuditReportArtifact:
-        if self.gemini_api_key:
+        if self.gemini_api_key or not settings.prod:
             try:
                 markdown = self._write_report_with_gemini(
                     building,
@@ -191,7 +195,7 @@ Structured context:
 {json.dumps(context, indent=2)}
 """.strip()
 
-        payload = self._generate_json(prompt)
+        payload = self._generate_json(prompt, operation="reasoning.diagnose")
         rows = payload.get("hypotheses", [])
         if not isinstance(rows, list) or not rows:
             raise RuntimeError("Gemini diagnostic response did not contain hypotheses")
@@ -256,7 +260,7 @@ Candidate catalog:
 {json.dumps([_candidate_for_prompt(candidate) for candidate in candidates], indent=2)}
 """.strip()
 
-        payload = self._generate_json(prompt)
+        payload = self._generate_json(prompt, operation="reasoning.select_recommendations")
         selected = payload.get("selected", [])
         if not isinstance(selected, list) or not selected:
             raise RuntimeError("Gemini recommendation selection response did not contain selected measures")
@@ -320,11 +324,12 @@ Structured context:
 {json.dumps(context, indent=2)}
 """.strip()
 
-        return self._generate_text(prompt)
+        return self._generate_text(prompt, operation="reasoning.write_report")
 
-    def _generate_json(self, prompt: str) -> dict[str, object]:
+    def _generate_json(self, prompt: str, *, operation: str) -> dict[str, object]:
         payload = self._request_gemini(
             prompt,
+            operation=operation,
             generation_config={
                 "temperature": 0.2,
                 "responseMimeType": "application/json",
@@ -332,20 +337,59 @@ Structured context:
             },
         )
         try:
-            return json.loads(payload)
+            parsed_obj = json.loads(payload)
         except json.JSONDecodeError as exc:
+            log_gemini_event(
+                operation,
+                "response_json_invalid",
+                model=self.model,
+                text_preview=payload[:800],
+            )
             raise RuntimeError(f"Failed to parse Gemini JSON response: {payload[:300]}") from exc
+        if isinstance(parsed_obj, dict):
+            log_gemini_event(
+                operation,
+                "response_parsed",
+                model=self.model,
+                top_level_keys=list(parsed_obj.keys()),
+            )
+        return parsed_obj
 
-    def _generate_text(self, prompt: str) -> str:
+    def _generate_text(self, prompt: str, *, operation: str) -> str:
         return self._request_gemini(
             prompt,
+            operation=operation,
             generation_config={
                 "temperature": 0.3,
                 "maxOutputTokens": 8192,
             },
         )
 
-    def _request_gemini(self, prompt: str, *, generation_config: dict[str, object]) -> str:
+    def _request_gemini(
+        self,
+        prompt: str,
+        *,
+        operation: str,
+        generation_config: dict[str, object],
+    ) -> str:
+        if not settings.prod:
+            text = load_response_text(operation)
+            log_gemini_event(
+                operation,
+                "playback",
+                model=self.model,
+                response_text_chars=len(text),
+            )
+            return text
+
+        log_gemini_event(
+            operation,
+            "request",
+            model=self.model,
+            prompt_chars=len(prompt),
+            prompt_preview=prompt[:1200],
+            generation_config=generation_config,
+        )
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": generation_config,
@@ -360,11 +404,39 @@ Structured context:
             with request.urlopen(req, timeout=90) as response:
                 parsed = json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
-            raise RuntimeError(exc.read().decode("utf-8")) from exc
+            body = exc.read().decode("utf-8", errors="replace")
+            log_gemini_event(operation, "http_error", model=self.model, status=exc.code, body_preview=body[:1200])
+            raise RuntimeError(body) from exc
         try:
-            return parsed["candidates"][0]["content"]["parts"][0]["text"]
+            text = parsed["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError) as exc:
+            log_gemini_event(
+                operation,
+                "response_unexpected_shape",
+                model=self.model,
+                top_level_keys=list(parsed.keys()) if isinstance(parsed, dict) else None,
+                payload_preview=json.dumps(parsed, default=str)[:2000],
+            )
             raise RuntimeError(f"Unexpected Gemini response payload: {parsed}") from exc
+        log_gemini_event(
+            operation,
+            "response_raw",
+            model=self.model,
+            usage_metadata=parsed.get("usageMetadata"),
+            response_text_chars=len(text),
+            response_text_preview=text[:2000],
+        )
+        save_recording(
+            operation,
+            model=self.model,
+            request_summary={
+                "prompt_chars": len(prompt),
+                "prompt": prompt,
+                "generation_config": generation_config,
+            },
+            response_text=text,
+        )
+        return text
 
 
 def _deterministic_hypotheses(

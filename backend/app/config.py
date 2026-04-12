@@ -37,6 +37,13 @@ for dotenv_name in (".env", ".env.local"):
     _load_dotenv_file(REPO_ROOT / dotenv_name)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "AuditAI Backend"
@@ -57,6 +64,7 @@ class Settings:
     ocr_model: str = os.getenv("AUDITAI_OCR_MODEL", "gemini-flash-latest")
     reasoning_model: str = os.getenv("AUDITAI_REASONING_MODEL", "gemini-pro-latest")
     max_workers: int = int(os.getenv("AUDITAI_MAX_WORKERS", "2"))
+    prod: bool = _env_bool("PROD", True)
 
 
 settings = Settings()

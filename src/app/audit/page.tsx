@@ -487,7 +487,7 @@ export default function AuditWizard() {
                         value={buildingInfo.squareFeet || ""}
                         onChange={(event) => setBuildingInfo({ squareFeet: Number(event.target.value) || 0 })}
                         className={fieldClassName}
-                        placeholder="125000"
+                        placeholder="160000"
                       />
                     </FormField>
 
@@ -497,7 +497,7 @@ export default function AuditWizard() {
                         value={buildingInfo.yearBuilt || ""}
                         onChange={(event) => setBuildingInfo({ yearBuilt: Number(event.target.value) || 0 })}
                         className={fieldClassName}
-                        placeholder="1987"
+                        placeholder="1940"
                       />
                     </FormField>
 
@@ -507,7 +507,7 @@ export default function AuditWizard() {
                         value={buildingInfo.floors || ""}
                         onChange={(event) => setBuildingInfo({ floors: Number(event.target.value) || 0 })}
                         className={fieldClassName}
-                        placeholder="12"
+                        placeholder="5"
                       />
                     </FormField>
 
@@ -517,7 +517,7 @@ export default function AuditWizard() {
                         value={buildingInfo.operatingHours || ""}
                         onChange={(event) => setBuildingInfo({ operatingHours: Number(event.target.value) || 0 })}
                         className={fieldClassName}
-                        placeholder="60"
+                        placeholder="80"
                       />
                     </FormField>
 

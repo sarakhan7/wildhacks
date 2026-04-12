@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         const extracted = await extractUtilityData(base64, file.type);
         allReadings.push(...extracted);
       } catch (err: any) {
-        console.error(`Failed to extract from \${file.name}:`, err);
+        console.error(`Failed to extract from ${file.name}:`, err);
         // Continue processing other files
       }
     }
@@ -75,13 +75,12 @@ export async function POST(request: Request) {
 // Generate reasonable mock utility bills if user hasn't uploaded any
 function generateMockReadings() {
   const readings = [];
-  const startMonth = 1;
   const year = 2024;
-  
+
   // Seasonal curve
   for (let i = 0; i < 12; i++) {
     const monthNum = i + 1;
-    const monthStr = `\${year}-\${monthNum.toString().padStart(2, "0")}`;
+    const monthStr = `${year}-${monthNum.toString().padStart(2, "0")}`;
     
     // Higher electric in summer
     const isSummer = monthNum >= 6 && monthNum <= 9;

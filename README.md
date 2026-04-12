@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a [Next.js](https://nextjs.org) app with a Python [FastAPI](https://fastapi.tiangolo.com/) backend for building audits and related APIs.
 
-## Getting Started
+## Prerequisites
 
-First, run the development server:
+- Node.js (see `package.json` engines if added later)
+- Python 3.11+ recommended
+
+## Install
+
+From the repository root:
+
+```bash
+npm ci
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+```
+
+Copy or configure `.env` as needed (see `backend/app/config.py` for variables such as `GEMINI_API_KEY`, `NOAA_API_TOKEN`, and Supabase settings).
+
+### `PROD`: live APIs vs fixtures (single switch)
+
+Set **`PROD`** in `.env` for both Next.js and the Python backend (same file is fine).
+
+| `PROD` | Behavior |
+|--------|----------|
+| **`true`** (default if unset) | Calls **Gemini**, **NOAA** (when `NOAA_API_TOKEN` is set), etc. After each successful response, **fixture files are written and overwrite** any previous file for that call. |
+| **`false`** | **No Gemini HTTP** (reads `gemini_recordings/*.json`). **No NOAA HTTP** if `weather_recordings/monthly_features.json` exists; otherwise uses the fast synthetic weather fallback. API keys can stay in `.env`; they are unused on paths that read fixtures. |
+
+**Gemini files** under **`gemini_recordings/`** (each run overwrites that operation’s file):
+
+| File | Source |
+|------|--------|
+| `ocr.extract.json` | Backend bill OCR |
+| `reasoning.diagnose.json` | Backend hypotheses JSON |
+| `reasoning.select_recommendations.json` | Backend ECM selection JSON |
+| `reasoning.write_report.json` | Backend report markdown |
+| `next.extractUtilityData.json` | Next.js bill OCR |
+| `next.generateAuditReport.json` | Next.js report markdown |
+
+With **`PROD=false`**, a missing Gemini fixture for a code path that runs raises a clear error until you have recorded it with **`PROD=true`**.
+
+**Weather:** with **`PROD=true`**, resolved monthly rows are saved to **`weather_recordings/monthly_features.json`** (overwritten each audit). With **`PROD=false`**, that file is used if present; if missing, synthetic HDD/CDD is used (no HTTP).
+
+### Gemini I/O logging (optional)
+
+Set `AUDITAI_LOG_GEMINI=true` for truncated console / `auditai.gemini` logs (does not write fixture files).
+
+## Run frontend and backend
+
+Use two terminals, both from the repo root:
+
+**Terminal 1 (API, port 8000):**
+
+```bash
+npm run backend:dev
+```
+
+**Terminal 2 (Next.js, default port 3000):**
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app proxies to the API using `AUDITAI_BACKEND_URL` when set; otherwise it defaults to `http://127.0.0.1:8000`. Open the URL printed by Next.js (often [http://localhost:3000](http://localhost:3000)).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Check the API with [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Production-style API without reload:
 
-## Learn More
+```bash
+npm run backend:start
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Project layout
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `src/` – Next.js frontend and API routes
+- `backend/` – FastAPI application (`backend.app.main:app`)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Learn more
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Next.js documentation](https://nextjs.org/docs)
+- [FastAPI documentation](https://fastapi.tiangolo.com/)

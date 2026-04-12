@@ -6,7 +6,9 @@ from datetime import date, datetime
 from math import asin, cos, pi, radians, sin, sqrt
 from urllib import error, parse, request
 
+from ..config import settings
 from ..schemas import BuildingProfile, WeatherMonthFeature
+from .weather_fixtures import save_fixture, try_load_fixture_by_month
 
 
 MONTH_LABELS = [f"2024-{index:02d}" for index in range(1, 13)]
@@ -37,19 +39,45 @@ class WeatherService:
         if not requested_months:
             return []
 
+        if not settings.prod:
+            return self._materialize_weather_from_fixture_or_fallback(building, requested_months)
+
+        features: list[WeatherMonthFeature] | None = None
         if self.noaa_api_token:
             try:
                 stations = self._find_candidate_stations(building.lat, building.lng, requested_months)
                 for station in stations[:NOAA_MAX_STATIONS]:
                     try:
-                        return self._fetch_monthly_features_from_noaa(station, requested_months)
+                        features = self._fetch_monthly_features_from_noaa(station, requested_months)
+                        break
                     except RuntimeError:
                         continue
             except Exception:
                 # The audit must still run if NOAA is unavailable or the token is invalid.
                 pass
 
-        return self._build_fallback_monthly_features(building, requested_months)
+        if features is None:
+            features = self._build_fallback_monthly_features(building, requested_months)
+
+        save_fixture(requested_months, features)
+
+        return features
+
+    def _materialize_weather_from_fixture_or_fallback(
+        self,
+        building: BuildingProfile,
+        requested_months: list[str],
+    ) -> list[WeatherMonthFeature]:
+        by_month = try_load_fixture_by_month()
+        if by_month is None:
+            return self._build_fallback_monthly_features(building, requested_months)
+        out: list[WeatherMonthFeature] = []
+        for month in requested_months:
+            if month in by_month:
+                out.append(by_month[month])
+            else:
+                out.extend(self._build_fallback_monthly_features(building, [month]))
+        return out
 
     def _build_fallback_monthly_features(
         self,

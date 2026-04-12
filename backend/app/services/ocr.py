@@ -8,7 +8,10 @@ from typing import Any
 from urllib import error, request
 import zlib
 
+from ..config import settings
 from ..schemas import OCRDocumentResult, OCRReading, UploadedDocument
+from .gemini_fixtures import load_response_text, save_recording
+from .gemini_io import log_gemini_event
 
 
 class OCRService:
@@ -20,6 +23,13 @@ class OCRService:
         deterministic = _extract_structured_pdf(document)
         if deterministic is not None:
             return deterministic
+        if not settings.prod:
+            try:
+                return self._extract_with_gemini(document)
+            except Exception as exc:
+                fallback = self._fallback_extract(document)
+                fallback.notes.append(f"Gemini fixture playback failed: {exc}")
+                return fallback
         if self.gemini_api_key:
             try:
                 return self._extract_with_gemini(document)
@@ -30,42 +40,92 @@ class OCRService:
         return self._fallback_extract(document)
 
     def _extract_with_gemini(self, document: UploadedDocument) -> OCRDocumentResult:
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": (
-                                "You are an OCR extractor for commercial utility bills. "
-                                "Return strict JSON with keys document_confidence, notes, readings. "
-                                "Each reading must contain month, kwh, therms, peak_kw, cost, confidence, source_pages, extraction_notes. "
-                                "Normalize billing month to YYYY-MM using the end date of the billing period."
-                            )
-                        },
-                        {
-                            "inline_data": {
-                                "mime_type": document.mime_type,
-                                "data": base64.b64encode(Path(document.storage_path).read_bytes()).decode("utf-8"),
-                            }
-                        },
-                    ]
-                }
-            ],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
-        }
-        req = request.Request(
-            url=f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.gemini_api_key}",
-            method="POST",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with request.urlopen(req, timeout=90) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
-        except error.HTTPError as exc:
-            raise RuntimeError(exc.read().decode("utf-8")) from exc
+        operation = "ocr.extract"
+        content: str
+        if not settings.prod:
+            content = load_response_text(operation)
+            log_gemini_event(
+                operation,
+                "playback",
+                model=self.model,
+                document_id=document.document_id,
+                filename=document.filename,
+                response_text_chars=len(content),
+            )
+        else:
+            b64 = base64.b64encode(Path(document.storage_path).read_bytes()).decode("utf-8")
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": (
+                                    "You are an OCR extractor for commercial utility bills. "
+                                    "Return strict JSON with keys document_confidence, notes, readings. "
+                                    "Each reading must contain month, kwh, therms, peak_kw, cost, confidence, source_pages, extraction_notes. "
+                                    "Normalize billing month to YYYY-MM using the end date of the billing period."
+                                )
+                            },
+                            {
+                                "inline_data": {
+                                    "mime_type": document.mime_type,
+                                    "data": b64,
+                                }
+                            },
+                        ]
+                    }
+                ],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
+            }
+            log_gemini_event(
+                operation,
+                "request",
+                model=self.model,
+                document_id=document.document_id,
+                filename=document.filename,
+                mime_type=document.mime_type,
+                inline_data_base64_chars=len(b64),
+                generation_config=payload["generationConfig"],
+                system_prompt_preview=payload["contents"][0]["parts"][0]["text"][:400],
+            )
+            req = request.Request(
+                url=f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.gemini_api_key}",
+                method="POST",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with request.urlopen(req, timeout=90) as response:
+                    parsed = json.loads(response.read().decode("utf-8"))
+            except error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                log_gemini_event(operation, "http_error", model=self.model, status=exc.code, body_preview=body[:1200])
+                raise RuntimeError(body) from exc
 
-        content = parsed["candidates"][0]["content"]["parts"][0]["text"]
+            usage = parsed.get("usageMetadata")
+            content = parsed["candidates"][0]["content"]["parts"][0]["text"]
+            log_gemini_event(
+                operation,
+                "response_raw",
+                model=self.model,
+                document_id=document.document_id,
+                usage_metadata=usage,
+                response_text_preview=content[:1500],
+                response_text_chars=len(content),
+            )
+            save_recording(
+                operation,
+                model=self.model,
+                request_summary={
+                    "document_id": document.document_id,
+                    "filename": document.filename,
+                    "mime_type": document.mime_type,
+                    "inline_data_base64_chars": len(b64),
+                    "generation_config": payload["generationConfig"],
+                    "system_prompt": payload["contents"][0]["parts"][0]["text"],
+                },
+                response_text=content,
+            )
         result = json.loads(content)
         readings = [
             OCRReading(
@@ -81,6 +141,15 @@ class OCRService:
             )
             for reading in result.get("readings", [])
         ]
+        log_gemini_event(
+            "ocr.extract",
+            "response_parsed",
+            model=self.model,
+            document_id=document.document_id,
+            readings_count=len(readings),
+            document_confidence=result.get("document_confidence"),
+            notes=result.get("notes"),
+        )
         return OCRDocumentResult(
             document_id=document.document_id,
             filename=document.filename,
