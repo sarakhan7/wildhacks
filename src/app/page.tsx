@@ -123,14 +123,12 @@ export default function Home() {
                 is wasting
                 <br />
                 <span className="block whitespace-nowrap font-main text-[0.84em] font-light italic tracking-[-0.06em] text-light-blue">
-                  <span className="sr-only">$47,000 a year.</span>
-                  <span aria-hidden="true">
-                    $
-                    <TypewriterCycle
-                      values={["47,000", "200,000", "13,000"]}
-                      className="inline-flex min-w-[6ch] items-center"
-                    />
-                    &nbsp;a year.
+                  <span className="sr-only">$47k a year.</span>
+                  <span aria-hidden="true" className="inline-flex items-baseline">
+                    <span className="inline-block min-w-[5ch]">
+                      <TypewriterCycle values={["$47,000", "$200,000", "$13,000"]} className="inline-block min-w-[5ch] text-left" />
+                    </span>
+                    <span className="ml-[-0.04em]"> a year.</span>
                   </span>
                 </span>
               </h1>
