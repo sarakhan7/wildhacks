@@ -290,6 +290,7 @@ class SceneSolar(BaseModel):
     annualFluxGrid: VisualizationGrid
     monthlyFluxGrids: list[dict[str, Any]]
     roofMaskGrid: VisualizationGrid
+    gridRadiusMeters: float = 100.0
 
 
 class VisualizationSurface(BaseModel):

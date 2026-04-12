@@ -53,7 +53,7 @@ type LayerState = {
   raycaster: THREE.Raycaster | null;
   roofMesh: THREE.Mesh | null;
   wallMeshes: THREE.Mesh[];
-  particleSystem: THREE.Points | null;
+  particleSystem: THREE.Object3D | null;
   hoverables: THREE.Object3D[];
   anchor: mapboxgl.MercatorCoordinate | null;
   meterScale: number;
@@ -64,7 +64,8 @@ type LayerState = {
   roofUniforms: Record<string, THREE.IUniform<unknown>> | null;
   wallUniforms: Array<Record<string, THREE.IUniform<unknown>>>;
   particleUniforms: Record<string, THREE.IUniform<unknown>> | null;
-  footprintPoints: LocalPoint[];
+  footprints: LocalPoint[][];
+  footprintLimits: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
   hoveredKey: string;
 };
 
@@ -88,7 +89,8 @@ function createEmptyLayerState(): LayerState {
     roofUniforms: null,
     wallUniforms: [],
     particleUniforms: null,
-    footprintPoints: [],
+    footprints: [],
+    footprintLimits: null,
     hoveredKey: "",
   };
 }
@@ -183,15 +185,8 @@ function distanceToCenter(ring: [number, number][], lng: number, lat: number) {
   return Math.hypot(centroid.lng - lng, centroid.lat - lat);
 }
 
-function geoRingArea(ring: [number, number][]): number {
-  let area = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const j = (i + 1) % ring.length;
-    area += ring[i][0] * ring[j][1];
-    area -= ring[j][0] * ring[i][1];
-  }
-  return Math.abs(area) / 2;
-}
+
+
 
 function pointInGeoRing(lng: number, lat: number, ring: [number, number][]): boolean {
   let inside = false;
@@ -205,132 +200,82 @@ function pointInGeoRing(lng: number, lat: number, ring: [number, number][]): boo
   return inside;
 }
 
-/** Extract ALL polygon rings from a feature (handles MultiPolygon properly) */
-function extractAllFeatureRings(feature: mapboxgl.MapboxGeoJSONFeature): [number, number][][] {
-  if (!feature.geometry) return [];
-  if (feature.geometry.type === "Polygon") {
-    return [feature.geometry.coordinates[0] as [number, number][]];
+function polygonsTouch(p1: [number, number][], p2: [number, number][]) {
+  const tol = 0.000015;
+  for (const v1 of p1) {
+    for (const v2 of p2) {
+      if (Math.abs(v1[0] - v2[0]) < tol && Math.abs(v1[1] - v2[1]) < tol) {
+        return true;
+      }
+    }
   }
-  if (feature.geometry.type === "MultiPolygon") {
-    return feature.geometry.coordinates.map((poly) => poly[0] as [number, number][]);
-  }
-  return [];
+  return false;
 }
 
-/** Convex hull (Andrew's monotone chain) */
-function convexHull(points: [number, number][]): [number, number][] {
-  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  if (sorted.length <= 2) return sorted;
-  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
-    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lower: [number, number][] = [];
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper: [number, number][] = [];
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const p = sorted[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  upper.pop();
-  lower.pop();
-  return lower.concat(upper);
-}
-
-/** Check if two bounding boxes overlap (with a small tolerance) */
-function bboxOverlap(a: [number, number][], b: [number, number][], tol = 0.00008): boolean {
-  const aMinX = Math.min(...a.map((p) => p[0])) - tol;
-  const aMaxX = Math.max(...a.map((p) => p[0])) + tol;
-  const aMinY = Math.min(...a.map((p) => p[1])) - tol;
-  const aMaxY = Math.max(...a.map((p) => p[1])) + tol;
-  const bMinX = Math.min(...b.map((p) => p[0]));
-  const bMaxX = Math.max(...b.map((p) => p[0]));
-  const bMinY = Math.min(...b.map((p) => p[1]));
-  const bMaxY = Math.max(...b.map((p) => p[1]));
-  return aMaxX >= bMinX && bMaxX >= aMinX && aMaxY >= bMinY && bMaxY >= aMinY;
-}
-
-function resolveFootprint(map: mapboxgl.Map, data: VisualizationSceneResponse): LocalPoint[] | null {
+function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse): { footprints: LocalPoint[][], bounds: { minX: number, maxX: number, minZ: number, maxZ: number } } | null {
   try {
     const point = map.project([data.building.lng, data.building.lat]);
-    // Query a very wide area to capture all parts of complex buildings
     const rendered = map.queryRenderedFeatures(
       [[point.x - 120, point.y - 120], [point.x + 120, point.y + 120]],
       { layers: ["visualization-context-buildings"] },
     );
 
-    if (rendered.length > 0) {
-      // Collect all rings from all features
-      type Entry = { rings: [number, number][][]; feature: mapboxgl.MapboxGeoJSONFeature };
-      const allEntries: Entry[] = rendered
-        .map((f) => ({ rings: extractAllFeatureRings(f), feature: f }))
-        .filter((e) => e.rings.length > 0 && e.rings.some((r) => r.length >= 3));
+    const allRings: [number, number][][] = [];
+    rendered.forEach(f => {
+      if (f.geometry && f.geometry.type === "Polygon") {
+        allRings.push(f.geometry.coordinates[0] as [number, number][]);
+      } else if (f.geometry && f.geometry.type === "MultiPolygon") {
+        f.geometry.coordinates.forEach(poly => allRings.push(poly[0] as [number, number][]));
+      }
+    });
 
-      // Find the feature/ring containing the building pin
-      let seedRing: [number, number][] | null = null;
-      for (const entry of allEntries) {
-        for (const ring of entry.rings) {
-          if (ring.length >= 3 && pointInGeoRing(data.building.lng, data.building.lat, ring)) {
-            seedRing = ring;
+    const validRings = allRings.filter(r => r && r.length >= 3);
+    if (validRings.length === 0) return null;
+
+    let seedIndex = -1;
+    let minD = Infinity;
+    for (let i = 0; i < validRings.length; i++) {
+        if (pointInGeoRing(data.building.lng, data.building.lat, validRings[i])) {
+            seedIndex = i;
             break;
-          }
         }
-        if (seedRing) break;
-      }
+        const d = distanceToCenter(validRings[i], data.building.lng, data.building.lat);
+        if (d < minD) { minD = d; seedIndex = i; }
+    }
 
-      if (!seedRing) {
-        // Fallback: pick largest ring
-        const flatRings = allEntries.flatMap((e) => e.rings).filter((r) => r.length >= 3);
-        flatRings.sort((a, b) => geoRingArea(b) - geoRingArea(a));
-        seedRing = flatRings[0] ?? null;
-      }
+    if (seedIndex === -1) return null;
 
-      if (seedRing) {
-        // Merge all adjacent features that share bounding box overlap with the seed
-        const allRings = allEntries.flatMap((e) => e.rings).filter((r) => r.length >= 3);
-        const merged: [number, number][] = [...seedRing];
-        const used = new Set<number>([allRings.indexOf(seedRing)]);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (let i = 0; i < allRings.length; i++) {
-            if (used.has(i)) continue;
-            // Check if this ring's bbox overlaps with any already-merged ring
-            if (bboxOverlap(merged, allRings[i])) {
-              merged.push(...allRings[i]);
-              used.add(i);
-              changed = true;
-            }
-          }
+    const grouped = new Set<number>([seedIndex]);
+    const queue = [seedIndex];
+    let head = 0;
+    while (head < queue.length) {
+      const curr = validRings[queue[head++]];
+      for (let i = 0; i < validRings.length; i++) {
+        if (!grouped.has(i) && polygonsTouch(curr, validRings[i])) {
+          grouped.add(i);
+          queue.push(i);
         }
-
-        // If we have >1 ring merged, compute convex hull; otherwise use the seed ring as-is
-        const hull = used.size > 1 ? convexHull(merged) : seedRing;
-        const fp = sanitizeFootprint(featureCoordinatesToLocal(hull, data.building.lng, data.building.lat));
-        if (fp.length >= 3) return fp;
       }
     }
 
-    // Fallback: querySourceFeatures
-    const sourceFeatures = map.querySourceFeatures("composite", { sourceLayer: "building" });
-    const candidates = sourceFeatures
-      .filter((feature) => feature.properties?.extrude === "true" || feature.properties?.extrude === true)
-      .map((feature) => ({ rings: extractAllFeatureRings(feature), feature }))
-      .filter((entry) => entry.rings.length > 0);
-
-    if (candidates.length > 0) {
-      const flatRings = candidates.flatMap((c) => c.rings).filter((r) => r.length >= 3);
-      const containing = flatRings.find((r) => pointInGeoRing(data.building.lng, data.building.lat, r));
-      const best = containing || flatRings.sort((a, b) => geoRingArea(b) - geoRingArea(a))[0];
-      if (best) {
-        const footprint = sanitizeFootprint(featureCoordinatesToLocal(best, data.building.lng, data.building.lat));
-        if (footprint.length >= 3) return footprint;
+    const footprints: LocalPoint[][] = [];
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    
+    Array.from(grouped).forEach(i => {
+      const fp = sanitizeFootprint(featureCoordinatesToLocal(validRings[i], data.building.lng, data.building.lat));
+      if (fp.length >= 3) {
+        footprints.push(fp);
+        fp.forEach(p => {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.z < minZ) minZ = p.z;
+          if (p.z > maxZ) maxZ = p.z;
+        });
       }
-    }
+    });
 
-    return null;
+    if (footprints.length === 0) return null;
+    return { footprints, bounds: { minX, maxX, minZ, maxZ } };
   } catch {
     return null;
   }
@@ -355,8 +300,8 @@ function createTexture(grid: VisualizationGrid, normalized = true) {
   );
   texture.needsUpdate = true;
   texture.flipY = true;
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   return texture;
@@ -399,18 +344,17 @@ function createRoofShaderMaterial(
 
       vec3 solarRamp(float t) {
         float s = clamp(t, 0.0, 1.0);
-        vec3 low  = vec3(0.18, 0.08, 0.52);  // deep purple for low irradiance
-        vec3 mid  = vec3(0.92, 0.45, 0.12);  // orange for medium
-        vec3 high = vec3(1.0,  0.92, 0.2);   // bright yellow for high
+        vec3 low  = vec3(0.2, 0.4, 0.9);   // bright blue
+        vec3 mid  = vec3(1.0, 0.85, 0.2);  // yellow
+        vec3 high = vec3(0.95, 0.2, 0.1);  // red
         return s < 0.5 ? mix(low, mid, s * 2.0) : mix(mid, high, (s - 0.5) * 2.0);
       }
 
       vec3 thermalRamp(float t) {
         float s = clamp(t, 0.0, 1.0);
-        vec3 cool = vec3(0.05, 0.22, 0.38);
-        vec3 warm = vec3(0.85, 0.25, 0.08);
-        vec3 hot  = vec3(1.0,  0.08, 0.02);
-        return s < 0.5 ? mix(cool, warm, s * 2.0) : mix(warm, hot, (s - 0.5) * 2.0);
+        vec3 cold  = vec3(0.2, 0.4, 0.9);
+        vec3 hot   = vec3(0.95, 0.2, 0.1);
+        return mix(cold, hot, s);
       }
 
       void main() {
@@ -435,130 +379,62 @@ function createRoofShaderMaterial(
   return { material, uniforms };
 }
 
-function createWallShaderMaterial(thermalTexture: THREE.DataTexture) {
-  const uniforms = {
-    uThermal: { value: thermalTexture },
-    uVisible: { value: 1 },
-  };
-
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    side: THREE.DoubleSide,
-    uniforms,
-    vertexShader: `
-      varying vec2 vUv;
-      varying vec3 vNormal;
-      void main() {
-        vUv = uv;
-        vNormal = normalMatrix * normal;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D uThermal;
-      uniform float uVisible;
-      varying vec2 vUv;
-      varying vec3 vNormal;
-
-      vec3 thermalRamp(float t) {
-        return mix(vec3(0.03, 0.16, 0.23), vec3(1.0, 0.33, 0.11), smoothstep(0.0, 1.0, t));
-      }
-
-      void main() {
-        float thermal = texture2D(uThermal, vUv).r;
-        vec3 color = thermalRamp(thermal);
-        vec3 lightDir = normalize(vec3(0.3, 0.9, 0.28));
-        float shade = 0.48 + max(dot(normalize(vNormal), lightDir), 0.0) * 0.4;
-        gl_FragColor = vec4(color * shade, uVisible * 0.88);
-      }
-    `,
-  });
-
-  material.polygonOffset = true;
-  material.polygonOffsetFactor = -1;
-  material.polygonOffsetUnits = -1;
-
-  return { material, uniforms };
-}
-
-function createParticleSystem(footprint: LocalPoint[], height: number, thermalSurfaces: ReturnType<typeof applyScenarioToThermal>) {
-  const bounds = {
-    minX: Math.min(...footprint.map((point) => point.x)),
-    maxX: Math.max(...footprint.map((point) => point.x)),
-    minZ: Math.min(...footprint.map((point) => point.z)),
-    maxZ: Math.max(...footprint.map((point) => point.z)),
-  };
-
-  const basePositions: number[] = [];
-  const directions: number[] = [];
-  const speeds: number[] = [];
-  const offsets: number[] = [];
-  const intensities: number[] = [];
-  const zeros: number[] = [];
-
-  const roof = thermalSurfaces.find((surface) => surface.kind === "roof");
-  if (roof) {
-    for (let row = 0; row < roof.patchGrid.rows; row += 1) {
-      for (let col = 0; col < roof.patchGrid.cols; col += 1) {
-        const index = row * roof.patchGrid.cols + col;
-        const flux = roof.patchValues[index];
-        if (flux <= roof.baseFluxWm2 * 0.2) continue;
-        const u = (col + 0.5) / roof.patchGrid.cols;
-        const v = (row + 0.5) / roof.patchGrid.rows;
-        const x = THREE.MathUtils.lerp(bounds.minX, bounds.maxX, u);
-        const z = THREE.MathUtils.lerp(bounds.minZ, bounds.maxZ, v);
-        // Emit upward with slight outward drift
-        basePositions.push(x, height + 0.2, z);
-        directions.push((u - 0.5) * 0.3, 1.0, (v - 0.5) * 0.3);
-        speeds.push(0.12 + flux / 80);
-        offsets.push(((row + 1) * (col + 3)) % 37 / 37);
-        intensities.push(Math.min(1, flux / 35));
-        zeros.push(0, 0, 0);
+function getExteriorEdges(polygons: LocalPoint[][]) {
+  const edges: Record<string, { start: LocalPoint, end: LocalPoint, count: number }> = {};
+  polygons.forEach(poly => {
+    for (let i = 0; i < poly.length; i++) {
+      const p1 = poly[i];
+      const p2 = poly[(i + 1) % poly.length];
+      const minX = Math.min(p1.x, p2.x);
+      const maxX = Math.max(p1.x, p2.x);
+      const minZ = Math.min(p1.z, p2.z);
+      const maxZ = Math.max(p1.z, p2.z);
+      const key = `${minX.toFixed(2)},${minZ.toFixed(2)}-${maxX.toFixed(2)},${maxZ.toFixed(2)}`;
+      const existing = edges[key];
+      if (existing) {
+        existing.count++;
+      } else {
+        edges[key] = { start: p1, end: p2, count: 1 };
       }
     }
-  }
+  });
+  return Object.values(edges).filter((e: any) => e.count <= 1).map((e: any) => ({ start: e.start, end: e.end }));
+}
 
-  thermalSurfaces
-    .filter((surface) => surface.kind !== "roof" && surface.baseFluxWm2 > 0)
-    .forEach((surface) => {
-      const dir =
-        surface.kind === "north_wall" ? new THREE.Vector3(0, 0.25, -1)
-        : surface.kind === "south_wall" ? new THREE.Vector3(0, 0.25, 1)
-        : surface.kind === "east_wall" ? new THREE.Vector3(1, 0.25, 0)
-        : new THREE.Vector3(-1, 0.25, 0);
+function createParticleSystem(exteriorEdges: Array<{start: LocalPoint, end: LocalPoint}>, height: number) {
+  const basePositions: number[] = [];
+  const directions: number[] = [];
+  const offsets: number[] = [];
+  const intensities: number[] = [];
 
-      for (let row = 0; row < surface.patchGrid.rows; row += 1) {
-        for (let col = 0; col < surface.patchGrid.cols; col += 1) {
-          const index = row * surface.patchGrid.cols + col;
-          const flux = surface.patchValues[index];
-          if (flux <= surface.baseFluxWm2 * 0.15) continue;
-          const u = (col + 0.5) / surface.patchGrid.cols;
-          const v = (row + 0.5) / surface.patchGrid.rows;
-          const y = THREE.MathUtils.lerp(0.5, height - 0.35, 1 - v);
-          let x = 0;
-          let z = 0;
-          if (surface.kind === "north_wall" || surface.kind === "south_wall") {
-            x = THREE.MathUtils.lerp(bounds.minX, bounds.maxX, u);
-            z = surface.kind === "north_wall" ? bounds.minZ : bounds.maxZ;
-          } else {
-            x = surface.kind === "east_wall" ? bounds.maxX : bounds.minX;
-            z = THREE.MathUtils.lerp(bounds.minZ, bounds.maxZ, u);
-          }
-          basePositions.push(x, y, z);
-          directions.push(dir.x, dir.y, dir.z);
-          speeds.push(0.08 + flux / 100);
-          offsets.push(((row + 2) * (col + 5)) % 41 / 41);
-          intensities.push(Math.min(1, flux / 32));
-          zeros.push(0, 0, 0);
-        }
-      }
-    });
+  exteriorEdges.forEach(edge => {
+     const dx = edge.end.x - edge.start.x;
+     const dz = edge.end.z - edge.start.z;
+     const len = Math.hypot(dx, dz);
+     if (len < 0.1) return;
+     
+     const nx = dz / len;
+     const nz = -dx / len;
+     
+     const numParticles = Math.floor(len * height * 0.4);
+     for (let i = 0; i < numParticles; i++) {
+        const t = Math.random();
+        const x = edge.start.x + dx * t;
+        const z = edge.start.z + dz * t;
+        const y = Math.random() * height;
+        const offset = Math.random();
+        const intensity = 0.3 + Math.random() * 0.7;
+        
+        basePositions.push(x, y, z);
+        directions.push(nx * 0.3, 1.0, nz * 0.3);
+        offsets.push(offset);
+        intensities.push(intensity);
+     }
+  });
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(zeros, 3));
   geometry.setAttribute("basePosition", new THREE.Float32BufferAttribute(basePositions, 3));
   geometry.setAttribute("direction", new THREE.Float32BufferAttribute(directions, 3));
-  geometry.setAttribute("speed", new THREE.Float32BufferAttribute(speeds, 1));
   geometry.setAttribute("offset", new THREE.Float32BufferAttribute(offsets, 1));
   geometry.setAttribute("intensity", new THREE.Float32BufferAttribute(intensities, 1));
 
@@ -575,39 +451,40 @@ function createParticleSystem(footprint: LocalPoint[], height: number, thermalSu
     vertexShader: `
       attribute vec3 basePosition;
       attribute vec3 direction;
-      attribute float speed;
       attribute float offset;
       attribute float intensity;
       uniform float uTime;
       uniform float uVisible;
       varying float vIntensity;
-      varying float vCycle;
+      varying float vAnimation;
       void main() {
+        float speed = 0.05 + intensity * 0.04;
         float cycle = fract(uTime * speed + offset);
-        float travelDist = 2.5 + intensity * 6.0;
-        vec3 animated = basePosition + direction * cycle * travelDist;
-        vec4 mvPosition = modelViewMatrix * vec4(animated, 1.0);
+        float travelY = cycle * 12.0;
+        
+        vec3 pos = basePosition + direction * travelY;
+        pos.x += sin(cycle * 6.28 + basePosition.y) * 0.5 * cycle;
+        pos.z += cos(cycle * 6.28 + basePosition.x) * 0.5 * cycle;
+        
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = (12.0 + intensity * 28.0) * uVisible * (0.6 + 0.4 * sin(cycle * 3.14159));
+        gl_PointSize = (12.0 + intensity * 30.0) * uVisible;
+        
+        vAnimation = smoothstep(0.0, 0.2, cycle) * smoothstep(1.0, 0.6, cycle);
         vIntensity = intensity;
-        vCycle = cycle;
       }
     `,
     fragmentShader: `
+      uniform float uVisible;
       varying float vIntensity;
-      varying float vCycle;
+      varying float vAnimation;
       void main() {
-        float dist = distance(gl_PointCoord, vec2(0.5));
+        float dist = length(gl_PointCoord - vec2(0.5));
         if (dist > 0.5) discard;
-        float fadeIn = smoothstep(0.0, 0.15, vCycle);
-        float fadeOut = smoothstep(1.0, 0.6, vCycle);
-        float lifeFade = fadeIn * fadeOut;
-        float radial = smoothstep(0.5, 0.05, dist);
-        float alpha = radial * lifeFade * (0.6 + vIntensity * 0.4);
-        vec3 warm = vec3(1.0, 0.55, 0.15);
-        vec3 hot = vec3(1.0, 0.15, 0.0);
-        vec3 color = mix(warm, hot, vIntensity);
-        gl_FragColor = vec4(color, alpha);
+        float radial = smoothstep(0.5, 0.1, dist);
+        
+        vec3 color = mix(vec3(0.0, 0.2, 0.8), vec3(0.9, 0.2, 0.1), vIntensity);
+        gl_FragColor = vec4(color, radial * vAnimation * 0.65 * uVisible);
       }
     `,
   });
@@ -618,72 +495,35 @@ function createParticleSystem(footprint: LocalPoint[], height: number, thermalSu
   };
 }
 
-function buildRoofGeometry(footprint: LocalPoint[], height: number) {
-  const shape = new THREE.Shape();
-  footprint.forEach((point, index) => {
-    if (index === 0) {
-      shape.moveTo(point.x, point.z);
-    } else {
-      shape.lineTo(point.x, point.z);
-    }
+function buildRoofGeometry(footprints: LocalPoint[][], height: number, radius: number) {
+  const shapes: THREE.Shape[] = [];
+  footprints.forEach(fp => {
+    const shape = new THREE.Shape();
+    fp.forEach((point, index) => {
+      if (index === 0) shape.moveTo(point.x, point.z);
+      else shape.lineTo(point.x, point.z);
+    });
+    shape.closePath();
+    shapes.push(shape);
   });
-  shape.closePath();
-  const geometry = new THREE.ShapeGeometry(shape, 12);
+
+  const geometry = new THREE.ShapeGeometry(shapes);
+  const pos = geometry.attributes.position;
+  const uvs = new Float32Array(pos.count * 2);
+  
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getY(i); 
+    uvs[i * 2] = (x + radius) / (2 * radius);
+    uvs[i * 2 + 1] = (z + radius) / (2 * radius);
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
   geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, height + 0.1, 0);
+  geometry.translate(0, height + 0.5, 0);
   geometry.computeVertexNormals();
   geometry.computeBoundsTree();
   return geometry;
-}
-
-function buildBuildingBody(footprint: LocalPoint[], height: number) {
-  const shape = new THREE.Shape();
-  footprint.forEach((point, index) => {
-    if (index === 0) {
-      shape.moveTo(point.x, point.z);
-    } else {
-      shape.lineTo(point.x, point.z);
-    }
-  });
-  shape.closePath();
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth: height,
-    bevelEnabled: false,
-  });
-  geometry.rotateX(-Math.PI / 2);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function createWallMesh(
-  kind: string,
-  start: LocalPoint,
-  end: LocalPoint,
-  height: number,
-  texture: THREE.DataTexture,
-) {
-  const length = Math.hypot(end.x - start.x, end.z - start.z);
-  const geometry = new THREE.PlaneGeometry(length, height, 15, 7);
-  const dx = end.x - start.x;
-  const dz = end.z - start.z;
-  const angle = Math.atan2(dz, dx);
-  const len = Math.hypot(dx, dz);
-  // Offset wall 0.5m outward to prevent z-fighting with building body and Mapbox extrusion
-  const normalX = len > 0 ? dz / len : 0;
-  const normalZ = len > 0 ? -dx / len : 0;
-  const midpoint = new THREE.Vector3(
-    (start.x + end.x) / 2 + normalX * 0.5,
-    height / 2,
-    (start.z + end.z) / 2 + normalZ * 0.5,
-  );
-  geometry.computeBoundsTree();
-
-  const { material, uniforms } = createWallShaderMaterial(texture);
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.copy(midpoint);
-  mesh.rotation.y = -angle;
-  mesh.userData.kind = kind;
-  return { mesh, uniforms };
 }
 
 function getMonthlyGrid(solar: SolarVisualization, month: number) {
@@ -789,22 +629,27 @@ export default function MapboxThreeScene({
     layerState.roofMaskTexture?.dispose();
     layerState.roofThermalTexture?.dispose();
 
-    const footprintResult = resolveFootprint(layerState.map, data);
+    const footprintResult = resolveFootprints(layerState.map, data);
     if (!footprintResult) {
-      // Building tiles not loaded yet — schedule a retry when map becomes idle
       const retryOnIdle = () => {
         layerState.map?.off("idle", retryOnIdle);
         rebuildScene();
       };
       layerState.map.on("idle", retryOnIdle);
-      // Use a temporary rectangle fallback so something renders immediately
       const tempFootprint = getRectangleFootprint(data.building.squareFeet, data.building.floors);
-      layerState.footprintPoints = tempFootprint;
+      layerState.footprints = [tempFootprint];
+      layerState.footprintLimits = {
+         minX: Math.min(...tempFootprint.map(p => p.x)),
+         maxX: Math.max(...tempFootprint.map(p => p.x)),
+         minZ: Math.min(...tempFootprint.map(p => p.z)),
+         maxZ: Math.max(...tempFootprint.map(p => p.z))
+      };
       return;
     }
-    const footprint = footprintResult;
+    const { footprints, bounds } = footprintResult;
     const height = data.building.inferredHeightMeters;
-    layerState.footprintPoints = footprint;
+    layerState.footprints = footprints;
+    layerState.footprintLimits = bounds;
 
     const roofSolarTexture = createTexture(getMonthlyGrid(data.solar, month), true);
     const roofMaskTexture = createTexture(data.solar.roofMaskGrid, false);
@@ -816,26 +661,12 @@ export default function MapboxThreeScene({
     layerState.roofMaskTexture = roofMaskTexture;
     layerState.roofThermalTexture = roofThermalTexture;
 
-    // --- Building body (solid 3D prism) ---
-    const bodyGeometry = buildBuildingBody(footprint, height);
-    const bodyMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0x4a7c9b,
-      metalness: 0.15,
-      roughness: 0.65,
-      transparent: true,
-      opacity: 0.82,
-      side: THREE.DoubleSide,
-    });
-    bodyMaterial.polygonOffset = true;
-    bodyMaterial.polygonOffsetFactor = -1;
-    bodyMaterial.polygonOffsetUnits = -1;
-    const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    bodyMesh.renderOrder = 1;
-    bodyMesh.userData.visualization = true;
-    layerState.scene.add(bodyMesh);
+    // Mapbox handles the 3D building body via fill-extrusion.
+    // Three.js only adds overlay layers: roof heatmap, wall thermal, particles.
 
     // --- Roof overlay (solar + thermal heatmap) ---
-    const roofGeometry = buildRoofGeometry(footprint, height);
+    const radius = data.solar.gridRadiusMeters || 100.0;
+    const roofGeometry = buildRoofGeometry(footprints, height, radius);
     const { material: roofMaterial, uniforms: roofUniforms } = createRoofShaderMaterial(
       roofSolarTexture,
       roofThermalTexture,
@@ -849,77 +680,30 @@ export default function MapboxThreeScene({
     layerState.roofUniforms = roofUniforms;
     layerState.scene.add(roofMesh);
 
-    // --- Thermal wall overlays ---
-    // Pick 4 longest edges from the footprint and assign compass directions based on angle
-    const edges: Array<{ start: LocalPoint; end: LocalPoint; length: number; angle: number }> = [];
-    for (let i = 0; i < footprint.length; i++) {
-      const s = footprint[i];
-      const e = footprint[(i + 1) % footprint.length];
-      const edgeLen = Math.hypot(e.x - s.x, e.z - s.z);
-      const edgeAngle = Math.atan2(e.z - s.z, e.x - s.x);
-      edges.push({ start: s, end: e, length: edgeLen, angle: edgeAngle });
-    }
-    // Sort by length and take up to 4 longest
-    const longestEdges = [...edges].sort((a, b) => b.length - a.length).slice(0, 4);
-    // Map each edge to compass direction based on its outward normal angle
-    const assignedKinds: Array<{ edge: typeof edges[0]; kind: string }> = longestEdges.map((edge) => {
-      // Normal angle is perpendicular to edge direction
-      const normalAngle = edge.angle - Math.PI / 2;
-      const normDeg = ((normalAngle * 180 / Math.PI) % 360 + 360) % 360;
-      let kind = "north_wall";
-      if (normDeg >= 45 && normDeg < 135) kind = "west_wall";
-      else if (normDeg >= 135 && normDeg < 225) kind = "south_wall";
-      else if (normDeg >= 225 && normDeg < 315) kind = "east_wall";
-      return { edge, kind };
-    });
-
-    const wallMeshes: THREE.Mesh[] = [];
-    const wallUniforms: Array<Record<string, THREE.IUniform<unknown>>> = [];
-    const wallThermalTextures: Partial<Record<string, THREE.DataTexture>> = {};
-    const usedKinds = new Set<string>();
-    for (const { edge, kind } of assignedKinds) {
-      // Don't assign same kind twice
-      const actualKind = usedKinds.has(kind) ? [...["north_wall","east_wall","south_wall","west_wall"] as const].find((k) => !usedKinds.has(k)) ?? kind : kind;
-      usedKinds.add(actualKind);
-      const surface = thermalSurfaces.find((entry) => entry.kind === actualKind);
-      if (!surface) continue;
-      const thermalTexture = createThermalGridTexture(surface);
-      wallThermalTextures[actualKind] = thermalTexture;
-      const { mesh, uniforms } = createWallMesh(actualKind, edge.start, edge.end, height, thermalTexture);
-      mesh.renderOrder = 3;
-      mesh.userData.visualization = true;
-      layerState.scene.add(mesh);
-      wallMeshes.push(mesh);
-      wallUniforms.push(uniforms);
-    }
-    layerState.wallMeshes = wallMeshes;
-    layerState.wallUniforms = wallUniforms;
-    layerState.wallThermalTextures = wallThermalTextures;
-
-    // --- Edge wireframe ---
+    // --- Clean edge wireframe for roof only ---
     const edgeGroup = new THREE.Group();
-    [roofMesh, ...wallMeshes].forEach((mesh) => {
-      const edges = new THREE.EdgesGeometry(mesh.geometry);
-      const lines = new THREE.LineSegments(
-        edges,
-        new THREE.LineBasicMaterial({ color: 0x1a7fa8, opacity: 0.35, transparent: true }),
-      );
-      lines.position.copy(mesh.position);
-      lines.rotation.copy(mesh.rotation);
-      lines.userData.visualization = true;
-      edgeGroup.add(lines);
-    });
+    const edges = new THREE.EdgesGeometry(roofMesh.geometry);
+    const lines = new THREE.LineSegments(
+      edges,
+      new THREE.LineBasicMaterial({ color: 0x1a7fa8, opacity: 0.35, transparent: true }),
+    );
+    lines.position.copy(roofMesh.position);
+    lines.rotation.copy(roofMesh.rotation);
+    lines.userData.visualization = true;
+    edgeGroup.add(lines);
     edgeGroup.userData.visualization = true;
     layerState.scene.add(edgeGroup);
 
-    // --- Particle system (heat-flow streamlines) ---
-    const { points, uniforms: particleUniforms } = createParticleSystem(footprint, height, thermalSurfaces);
+    // --- Particle system (wind flow streamlines) ---
+    const exteriorEdges = getExteriorEdges(footprints);
+    const { points, uniforms: particleUniforms } = createParticleSystem(exteriorEdges, height);
     points.userData.visualization = true;
+    points.renderOrder = 3;
     layerState.particleSystem = points;
     layerState.particleUniforms = particleUniforms;
     layerState.scene.add(points);
 
-    layerState.hoverables = [roofMesh, ...wallMeshes];
+    layerState.hoverables = [roofMesh];
   }, [data, month, thermalSurfaces]);
 
   useEffect(() => {

@@ -9,7 +9,8 @@ from ..schemas import SceneSolar, SolarSegmentStat, VisualizationGrid
 from ..config import settings
 
 
-SOLAR_GRID_SIZE = 32
+SOLAR_GRID_RADIUS = 175.0
+SOLAR_GRID_SIZE = 350
 
 
 def get_solar_api_key() -> str:
@@ -56,39 +57,12 @@ def fetch_geotiff_grid(url: str, key: str) -> Dict[str, Any]:
     }
 
 
-def downsample_grid(
-    source: List[float],
-    width: int,
-    height: int,
-    target_width: int,
-    target_height: int,
-    mask: Optional[List[float]] = None
-) -> VisualizationGrid:
-    values = []
-    
-    for row in range(target_height):
-        y0 = math.floor((row / target_height) * height)
-        y1 = max(y0 + 1, math.floor(((row + 1) / target_height) * height))
-        for col in range(target_width):
-            x0 = math.floor((col / target_width) * width)
-            x1 = max(x0 + 1, math.floor(((col + 1) / target_width) * width))
-            
-            total_sum = 0.0
-            count = 0
-            for y in range(y0, y1):
-                for x in range(x0, x1):
-                    idx = y * width + x
-                    if mask is not None and mask[idx] <= 0:
-                        continue
-                    val = source[idx]
-                    if not math.isfinite(val):
-                        continue
-                    total_sum += val
-                    count += 1
-            
-            values.append(round(total_sum / count, 4) if count > 0 else 0.0)
-            
-    return VisualizationGrid(width=target_width, height=target_height, values=values)
+def mask_and_round(source: List[float], width: int, height: int, mask: Optional[List[float]] = None) -> VisualizationGrid:
+    if mask is not None:
+        values = [round(val, 4) if mask[i] > 0 and math.isfinite(val) else 0.0 for i, val in enumerate(source)]
+    else:
+        values = [round(val, 4) if math.isfinite(val) else 0.0 for val in source]
+    return VisualizationGrid(width=width, height=height, values=values)
 
 
 def build_fallback_solar(building: Any) -> SceneSolar:
@@ -142,7 +116,8 @@ def build_fallback_solar(building: Any) -> SceneSolar:
         roofSegmentStats=[],
         annualFluxGrid=annual_flux_grid,
         monthlyFluxGrids=monthly_flux_grids,
-        roofMaskGrid=roof_mask_grid
+        roofMaskGrid=roof_mask_grid,
+        gridRadiusMeters=SOLAR_GRID_RADIUS
     )
 
 
@@ -170,11 +145,11 @@ class SolarOverlayBuilder:
                 "key": key,
                 "location.latitude": lat,
                 "location.longitude": lng,
-                "radiusMeters": "45",
+                "radiusMeters": str(SOLAR_GRID_RADIUS),
                 "view": "FULL_LAYERS",
                 "requiredQuality": "HIGH",
                 "exactQualityRequired": "true",
-                "pixelSizeMeters": "0.5"
+                "pixelSizeMeters": "1.0"
             })
             
             layers = fetch_google_json(f"https://solar.googleapis.com/v1/dataLayers:get?{layer_params}")
@@ -191,12 +166,12 @@ class SolarOverlayBuilder:
             mask = fetch_geotiff_grid(mask_url, key)
             
             mask_band = mask["bands"][0]
-            annual_flux_grid = downsample_grid(annual["bands"][0], annual["width"], annual["height"], SOLAR_GRID_SIZE, SOLAR_GRID_SIZE, mask_band)
-            roof_mask_grid = downsample_grid(mask_band, mask["width"], mask["height"], SOLAR_GRID_SIZE, SOLAR_GRID_SIZE)
+            annual_flux_grid = mask_and_round(annual["bands"][0], annual["width"], annual["height"], mask_band)
+            roof_mask_grid = mask_and_round(mask_band, mask["width"], mask["height"], None)
             
             monthly_flux_grids = []
             for i, band in enumerate(monthly["bands"][:12]):
-                mg = downsample_grid(band, monthly["width"], monthly["height"], SOLAR_GRID_SIZE, SOLAR_GRID_SIZE, mask_band)
+                mg = mask_and_round(band, monthly["width"], monthly["height"], mask_band)
                 monthly_flux_grids.append({
                     "month": i + 1,
                     "width": mg.width,
@@ -239,7 +214,8 @@ class SolarOverlayBuilder:
                 roofSegmentStats=segment_stats,
                 annualFluxGrid=annual_flux_grid,
                 monthlyFluxGrids=monthly_flux_grids,
-                roofMaskGrid=roof_mask_grid
+                roofMaskGrid=roof_mask_grid,
+                gridRadiusMeters=SOLAR_GRID_RADIUS
             )
             
         except Exception:

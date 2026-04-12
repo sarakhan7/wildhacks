@@ -42,6 +42,7 @@ export type SolarVisualization = {
   annualFluxGrid: VisualizationGrid;
   monthlyFluxGrids: Array<VisualizationGrid & { month: number }>;
   roofMaskGrid: VisualizationGrid;
+  gridRadiusMeters?: number;
 };
 
 export type VisualizationSurfaceKind =

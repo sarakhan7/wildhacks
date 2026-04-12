@@ -44,7 +44,8 @@ type DataLayersResponse = {
   maskUrl?: string;
 };
 
-const SOLAR_GRID_SIZE = 64;
+const SOLAR_GRID_RADIUS = 175;
+const SOLAR_GRID_SIZE = 350;
 
 function getSolarApiKey() {
   return process.env.GOOGLE_SOLAR_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";
@@ -84,42 +85,18 @@ async function fetchGeoTiffGrid(url: string, key: string) {
   };
 }
 
-function downsampleGrid(
+function maskAndRound(
   source: number[],
   width: number,
   height: number,
-  targetWidth: number,
-  targetHeight: number,
-  mask?: number[],
+  mask?: number[]
 ): VisualizationGrid {
-  const values: number[] = [];
-  for (let row = 0; row < targetHeight; row += 1) {
-    const y0 = Math.floor((row / targetHeight) * height);
-    const y1 = Math.max(y0 + 1, Math.floor(((row + 1) / targetHeight) * height));
-    for (let col = 0; col < targetWidth; col += 1) {
-      const x0 = Math.floor((col / targetWidth) * width);
-      const x1 = Math.max(x0 + 1, Math.floor(((col + 1) / targetWidth) * width));
-
-      let sum = 0;
-      let count = 0;
-      for (let y = y0; y < y1; y += 1) {
-        for (let x = x0; x < x1; x += 1) {
-          const index = y * width + x;
-          if (mask && mask[index] <= 0) {
-            continue;
-          }
-          const value = source[index];
-          if (!Number.isFinite(value)) {
-            continue;
-          }
-          sum += value;
-          count += 1;
-        }
-      }
-      values.push(Number((count > 0 ? sum / count : 0).toFixed(4)));
-    }
-  }
-  return { width: targetWidth, height: targetHeight, values };
+  const values = source.map((val, i) => {
+    if (mask && mask[i] <= 0) return 0;
+    if (!Number.isFinite(val)) return 0;
+    return Number(val.toFixed(4));
+  });
+  return { width, height, values };
 }
 
 function buildFallbackSolar(results: AuditResultsBundle): SolarVisualization {
@@ -205,6 +182,7 @@ function buildFallbackSolar(results: AuditResultsBundle): SolarVisualization {
       height: SOLAR_GRID_SIZE,
       values: maskValues,
     },
+    gridRadiusMeters: SOLAR_GRID_RADIUS,
   };
 }
 
@@ -231,11 +209,11 @@ export async function buildSolarVisualization(results: AuditResultsBundle): Prom
       key,
       "location.latitude": String(lat),
       "location.longitude": String(lng),
-      radiusMeters: "45",
+      radiusMeters: String(SOLAR_GRID_RADIUS),
       view: "FULL_LAYERS",
       requiredQuality: "HIGH",
       exactQualityRequired: "true",
-      pixelSizeMeters: "0.5",
+      pixelSizeMeters: "1.0",
     });
 
     const layers = await fetchGoogleJson<DataLayersResponse>(
@@ -253,33 +231,12 @@ export async function buildSolarVisualization(results: AuditResultsBundle): Prom
     ]);
 
     const maskBand = mask.bands[0];
-    const annualFluxGrid = downsampleGrid(
-      annual.bands[0],
-      annual.width,
-      annual.height,
-      SOLAR_GRID_SIZE,
-      SOLAR_GRID_SIZE,
-      maskBand,
-    );
-
-    const roofMaskGrid = downsampleGrid(
-      maskBand,
-      mask.width,
-      mask.height,
-      SOLAR_GRID_SIZE,
-      SOLAR_GRID_SIZE,
-    );
+    const annualFluxGrid = maskAndRound(annual.bands[0], annual.width, annual.height, maskBand);
+    const roofMaskGrid = maskAndRound(maskBand, mask.width, mask.height);
 
     const monthlyFluxGrids = monthly.bands.slice(0, 12).map((band, index) => ({
       month: index + 1,
-      ...downsampleGrid(
-        band,
-        monthly.width,
-        monthly.height,
-        SOLAR_GRID_SIZE,
-        SOLAR_GRID_SIZE,
-        maskBand,
-      ),
+      ...maskAndRound(band, monthly.width, monthly.height, maskBand),
     }));
 
     const roofStats = insights.solarPotential?.wholeRoofStats;
@@ -312,6 +269,7 @@ export async function buildSolarVisualization(results: AuditResultsBundle): Prom
       annualFluxGrid,
       monthlyFluxGrids,
       roofMaskGrid,
+      gridRadiusMeters: SOLAR_GRID_RADIUS,
     };
   } catch {
     return buildFallbackSolar(results);
