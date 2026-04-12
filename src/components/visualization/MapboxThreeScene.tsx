@@ -1,7 +1,7 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Marker, type MapRef } from "react-map-gl/mapbox";
 import * as THREE from "three";
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-mesh-bvh";
@@ -42,6 +42,14 @@ type Props = {
   overlay: VisualizationOverlayMode;
   month: number;
   particlesEnabled: boolean;
+  roofCalibration: {
+    offsetX: number;
+    offsetY: number;
+    scaleX: number;
+    scaleY: number;
+    flipX: boolean;
+    flipY: boolean;
+  };
   onHoverChange: (payload: HoverPayload) => void;
 };
 
@@ -250,6 +258,51 @@ function ringMatchesGeoBounds(ring: [number, number][], bounds: GeoBounds) {
   return verticesInside >= 2;
 }
 
+function ringsConnected(a: [number, number][], b: [number, number][]) {
+  if (polygonsTouch(a, b)) {
+    return true;
+  }
+
+  const aCentroid = centroidOfRing(a);
+  const bCentroid = centroidOfRing(b);
+  return (
+    pointInGeoRing(aCentroid.lng, aCentroid.lat, b) ||
+    pointInGeoRing(bCentroid.lng, bCentroid.lat, a)
+  );
+}
+
+function distancePointToSegment2d(point: LocalPoint, start: LocalPoint, end: LocalPoint) {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const lengthSq = dx * dx + dz * dz;
+  if (lengthSq <= 1e-6) {
+    return Math.hypot(point.x - start.x, point.z - start.z);
+  }
+  const t = Math.min(
+    1,
+    Math.max(0, ((point.x - start.x) * dx + (point.z - start.z) * dz) / lengthSq),
+  );
+  const projected = {
+    x: start.x + dx * t,
+    z: start.z + dz * t,
+  };
+  return Math.hypot(point.x - projected.x, point.z - projected.z);
+}
+
+function localRingsNear(a: LocalPoint[], b: LocalPoint[], thresholdMeters = 14) {
+  for (let i = 0; i < a.length; i += 1) {
+    const point = a[i];
+    for (let j = 0; j < b.length; j += 1) {
+      const start = b[j];
+      const end = b[(j + 1) % b.length];
+      if (distancePointToSegment2d(point, start, end) <= thresholdMeters) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function resolveFootprints(
   map: mapboxgl.Map,
   data: VisualizationSceneResponse,
@@ -285,11 +338,80 @@ function resolveFootprints(
     const searchRings = validRings.length > 0 ? validRings : unfilteredRings;
     if (searchRings.length === 0) return null;
 
+    const candidateRings = searchRings
+      .map((ringRecord) => {
+        const localRing = sanitizeFootprint(
+          featureCoordinatesToLocal(ringRecord.ring, data.building.lng, data.building.lat),
+        );
+        if (localRing.length < 3) {
+          return null;
+        }
+        return {
+          ...ringRecord,
+          localRing,
+          localCentroid: centroidOfLocalRing(localRing),
+        };
+      })
+      .filter(
+        (
+          ringRecord,
+        ): ringRecord is {
+          ring: [number, number][];
+          height: number;
+          localRing: LocalPoint[];
+          localCentroid: LocalPoint;
+        } => Boolean(ringRecord),
+      );
+    if (candidateRings.length === 0) return null;
+
+    const seedIndex = candidateRings.findIndex((ring) =>
+      pointInGeoRing(data.building.lng, data.building.lat, ring.ring),
+    );
+    const nearestIndex =
+      seedIndex >= 0
+        ? seedIndex
+        : candidateRings.reduce((bestIndex, ring, index, list) => {
+            const bestDistance = distanceToCenter(list[bestIndex].ring, data.building.lng, data.building.lat);
+            const nextDistance = distanceToCenter(ring.ring, data.building.lng, data.building.lat);
+            return nextDistance < bestDistance ? index : bestIndex;
+          }, 0);
+
+    const selected = new Set<number>([nearestIndex]);
+    const queue = [nearestIndex];
+
+    while (queue.length > 0) {
+      const currentIndex = queue.shift()!;
+      const currentRing = candidateRings[currentIndex];
+
+      candidateRings.forEach((candidate, candidateIndex) => {
+        if (selected.has(candidateIndex)) {
+          return;
+        }
+
+        const centroidDistance = Math.hypot(
+          currentRing.localCentroid.x - candidate.localCentroid.x,
+          currentRing.localCentroid.z - candidate.localCentroid.z,
+        );
+        if (
+          !ringsConnected(currentRing.ring, candidate.ring) &&
+          !localRingsNear(currentRing.localRing, candidate.localRing) &&
+          centroidDistance > 42
+        ) {
+          return;
+        }
+
+        selected.add(candidateIndex);
+        queue.push(candidateIndex);
+      });
+    }
+
+    const clusteredRings = Array.from(selected).map((index) => candidateRings[index]);
+
     const parts: BuildingPart[] = [];
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     
-    searchRings.forEach((ringRecord) => {
-      const fp = sanitizeFootprint(featureCoordinatesToLocal(ringRecord.ring, data.building.lng, data.building.lat));
+    clusteredRings.forEach((ringRecord) => {
+      const fp = ringRecord.localRing;
       if (fp.length >= 3) {
         parts.push({ ring: fp, height: ringRecord.height });
         fp.forEach(p => {
@@ -397,6 +519,18 @@ function createLocalProjector(centerLng: number, centerLat: number) {
     toLocal,
     toLngLat,
     toUv,
+  };
+}
+
+function applyUvCalibration(
+  uv: { u: number; v: number },
+  calibration: Props["roofCalibration"],
+) {
+  const centeredU = (calibration.flipX ? 1 - uv.u : uv.u) - 0.5;
+  const centeredV = (calibration.flipY ? 1 - uv.v : uv.v) - 0.5;
+  return {
+    u: clamp01(centeredU * calibration.scaleX + 0.5 + calibration.offsetX),
+    v: clamp01(centeredV * calibration.scaleY + 0.5 + calibration.offsetY),
   };
 }
 
@@ -964,6 +1098,7 @@ function buildRoofGroup(
   centerLng: number,
   centerLat: number,
   renderBounds: GeoBounds,
+  roofCalibration: Props["roofCalibration"],
 ) {
   const projector = createLocalProjector(centerLng, centerLat);
   return parts.map((part) => {
@@ -982,7 +1117,7 @@ function buildRoofGroup(
     const uvs = new Float32Array(positions.count * 2);
     for (let index = 0; index < positions.count; index += 1) {
       const point = { x: positions.getX(index), z: positions.getY(index) };
-      const uv = projector.toUv(point, renderBounds);
+      const uv = applyUvCalibration(projector.toUv(point, renderBounds), roofCalibration);
       uvs[index * 2] = uv.u;
       uvs[index * 2 + 1] = uv.v;
     }
@@ -1412,6 +1547,7 @@ export default function MapboxThreeScene({
   overlay,
   month,
   particlesEnabled,
+  roofCalibration,
   onHoverChange,
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
@@ -1420,6 +1556,7 @@ export default function MapboxThreeScene({
   const rebuildSceneRef = useRef<() => void>(() => {});
   const mouseRef = useRef(new THREE.Vector2(0, 0));
   const hoverDirtyRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const thermalSurfaces = useMemo(
     () => applyScenarioToThermal(data.thermal, scenario, month || 7),
@@ -1512,6 +1649,7 @@ export default function MapboxThreeScene({
       data.building.lng,
       data.building.lat,
       displayRoofGrids.renderBounds,
+      roofCalibration,
     );
     layerState.roofMesh = roofMeshes[0] ?? null;
     layerState.roofUniforms = roofUniforms;
@@ -1541,13 +1679,16 @@ export default function MapboxThreeScene({
     layerState.scene.add(points);
 
     layerState.hoverables = [...roofMeshes, ...wallMeshes];
-  }, [data, roofGrids, thermalSurfaces]);
+  }, [data, roofCalibration, roofGrids, thermalSurfaces]);
 
   useEffect(() => {
     rebuildSceneRef.current = rebuildScene;
   }, [rebuildScene]);
 
   useEffect(() => {
+    if (!mapReady) {
+      return;
+    }
     const map = mapRef.current?.getMap();
     if (!map || customLayerAddedRef.current) {
       return;
@@ -1658,7 +1799,7 @@ export default function MapboxThreeScene({
       layerState.renderer?.dispose();
       layerStateRef.current = createEmptyLayerState();
     };
-  }, [data, onHoverChange, overlay, particlesEnabled, rebuildScene, roofGrids, thermalSurfaces]);
+  }, [data, mapReady, onHoverChange, overlay, particlesEnabled, rebuildScene, roofGrids, thermalSurfaces]);
 
   useEffect(() => {
     if (!customLayerAddedRef.current) {
@@ -1680,6 +1821,7 @@ export default function MapboxThreeScene({
           bearing: -26,
         }}
         mapStyle="mapbox://styles/mapbox/light-v11"
+        onLoad={() => setMapReady(true)}
         onMouseMove={(event) => {
           const map = mapRef.current?.getMap();
           if (!map) {

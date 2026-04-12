@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Building2, LoaderCircle, Orbit, SunMedium, Thermometer, Waves } from "lucide-react";
+import { ArrowLeft, Building2, LoaderCircle, SunMedium, Thermometer, Waves } from "lucide-react";
 
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAudit } from "@/context/AuditContext";
@@ -26,28 +26,6 @@ const SCENARIOS: Array<{ id: VisualizationScenario; label: string }> = [
   { id: "rooftop_solar", label: "Rooftop Solar" },
 ];
 
-const OVERLAYS: Array<{ id: VisualizationOverlayMode; label: string }> = [
-  { id: "both", label: "Both" },
-  { id: "solar", label: "Solar" },
-  { id: "thermal", label: "Thermal" },
-];
-
-const MONTHS = [
-  { value: 0, label: "Annual" },
-  { value: 1, label: "Jan" },
-  { value: 2, label: "Feb" },
-  { value: 3, label: "Mar" },
-  { value: 4, label: "Apr" },
-  { value: 5, label: "May" },
-  { value: 6, label: "Jun" },
-  { value: 7, label: "Jul" },
-  { value: 8, label: "Aug" },
-  { value: 9, label: "Sep" },
-  { value: 10, label: "Oct" },
-  { value: 11, label: "Nov" },
-  { value: 12, label: "Dec" },
-];
-
 type HoverCard = {
   title: string;
   detail: string;
@@ -64,17 +42,26 @@ function scenarioDisplayLabel(scenario: VisualizationScenario) {
   return SCENARIOS.find((item) => item.id === scenario)?.label ?? "Current";
 }
 
+const DEFAULT_ROOF_CALIBRATION = {
+  offsetX: 0.074,
+  offsetY: -0.044,
+  scaleX: 0.55,
+  scaleY: 0.55,
+  flipX: false,
+  flipY: false,
+};
+
 export default function Audit3DView() {
   const router = useRouter();
   const { analysisResults, auditId, buildingInfo } = useAudit();
   const [data, setData] = useState<VisualizationSceneResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [scenario, setScenario] = useState<VisualizationScenario>("current");
-  const [overlay, setOverlay] = useState<VisualizationOverlayMode>("both");
-  const [month, setMonth] = useState(0);
-  const [particlesEnabled, setParticlesEnabled] = useState(true);
   const [hovered, setHovered] = useState<HoverCard | null>(null);
+  const scenario: VisualizationScenario = "current";
+  const overlay: VisualizationOverlayMode = "both";
+  const month = 0;
+  const particlesEnabled = true;
 
   useEffect(() => {
     if (!analysisResults || !auditId) {
@@ -220,6 +207,7 @@ export default function Audit3DView() {
                   overlay={overlay}
                   month={month}
                   particlesEnabled={particlesEnabled}
+                  roofCalibration={DEFAULT_ROOF_CALIBRATION}
                   onHoverChange={setHovered}
                 />
               </div>
@@ -227,72 +215,6 @@ export default function Audit3DView() {
           </GlassCard>
 
           <div className="flex flex-col gap-6">
-            <GlassCard className="rounded-[2rem] p-5">
-              <div className="mb-4 flex items-center gap-3">
-                <Orbit className="h-5 w-5 text-mid-navy" />
-                <h2 className="font-heading text-lg font-bold tracking-[-0.03em] text-navy">Scene Controls</h2>
-              </div>
-
-              <ControlGroup label="Scenario">
-                <div className="flex flex-wrap gap-2">
-                  {SCENARIOS.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setScenario(item.id)}
-                      className={pillClassName(scenario === item.id)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </ControlGroup>
-
-              <ControlGroup label="Overlay">
-                <div className="flex flex-wrap gap-2">
-                  {OVERLAYS.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setOverlay(item.id)}
-                      className={pillClassName(overlay === item.id)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </ControlGroup>
-
-              <ControlGroup label="Season / Month">
-                <div className="grid grid-cols-4 gap-2">
-                  {MONTHS.map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => setMonth(item.value)}
-                      className={tinyPillClassName(month === item.value)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </ControlGroup>
-
-              <div className="mt-5 flex items-center justify-between rounded-[1.4rem] border border-white/58 bg-white/34 px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-navy">Particle flow</p>
-                  <p className="text-xs text-[var(--text-muted)]">Show animated heat-loss streamlines</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setParticlesEnabled((current) => !current)}
-                  className={tinyPillClassName(particlesEnabled)}
-                >
-                  {particlesEnabled ? "On" : "Off"}
-                </button>
-              </div>
-            </GlassCard>
-
             <GlassCard className="rounded-[2rem] p-5">
               <div className="mb-4 flex items-center gap-3">
                 <SunMedium className="h-5 w-5 text-[var(--accent-amber)]" />
@@ -358,15 +280,6 @@ export default function Audit3DView() {
   );
 }
 
-function ControlGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-4">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">{label}</p>
-      {children}
-    </div>
-  );
-}
-
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[1.25rem] border border-white/58 bg-white/34 p-4">
@@ -383,24 +296,6 @@ function StatRow({ label, value }: { label: string; value: string }) {
       <span className="font-medium text-navy">{value}</span>
     </div>
   );
-}
-
-function pillClassName(active: boolean) {
-  return [
-    "rounded-full border px-4 py-2 text-sm font-medium transition-all",
-    active
-      ? "border-[var(--accent-blue)] bg-[var(--accent-blue-dim)] text-mid-navy"
-      : "border-white/58 bg-white/30 text-[var(--text-secondary)] hover:border-white/80 hover:bg-white/42 hover:text-navy",
-  ].join(" ");
-}
-
-function tinyPillClassName(active: boolean) {
-  return [
-    "rounded-full border px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.08em] transition-all",
-    active
-      ? "border-[var(--accent-blue)] bg-[var(--accent-blue-dim)] text-mid-navy"
-      : "border-white/58 bg-white/30 text-[var(--text-muted)] hover:border-white/80 hover:bg-white/42 hover:text-navy",
-  ].join(" ");
 }
 
 function MetricCard({ label, value, detail }: { label: string; value: string; detail: string }) {

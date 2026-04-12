@@ -281,7 +281,7 @@ export default function Home() {
       </section>
 
       {/* ─── CTA / Footer ──────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-[var(--gradient-footer)]">
+      <section className="relative overflow-hidden section-footer">
         {/* Radial glow accent */}
         <div className="footer-glow pointer-events-none absolute inset-0" />
 

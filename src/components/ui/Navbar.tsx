@@ -5,7 +5,6 @@ import { NavbarActions } from "@/components/ui/NavbarActions";
 const marketingLinks = [
   { label: "How it works", href: "/#how-it-works" },
   { label: "Features", href: "/#features" },
-  { label: "Start demo", href: "/audit" },
 ];
 
 export function Navbar() {

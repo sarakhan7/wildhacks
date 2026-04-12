@@ -490,6 +490,10 @@ img {
   );
 }
 
+.section-footer {
+  background: var(--gradient-footer);
+}
+
 /* ─── Gradient section title accent ──────────────────── */
 .title-accent {
   background: linear-gradient(135deg, var(--mid-navy) 0%, var(--accent-cyan) 100%);

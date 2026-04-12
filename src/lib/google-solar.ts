@@ -80,7 +80,7 @@ type SolarSource = {
 
 const SOLAR_GRID_RADIUS = 175;
 const SOLAR_GRID_SIZE = 160;
-const PROBE_FRACTIONS = [0.16, 0.5, 0.84];
+const PROBE_FRACTIONS = [0.08, 0.24, 0.4, 0.6, 0.76, 0.92];
 
 function getSolarApiKey() {
   return process.env.GOOGLE_SOLAR_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";
@@ -569,10 +569,10 @@ function generateProbePoints(lat: number, lng: number, bounds: GeoBounds | null)
 }
 
 function shouldIncludeInsight(candidateBounds: GeoBounds, primaryBounds: GeoBounds) {
-  const expandedPrimary = expandBounds(primaryBounds, 0.24);
+  const expandedPrimary = expandBounds(primaryBounds, 0.34);
   const overlap = getIntersectionArea(candidateBounds, expandedPrimary);
   const minArea = Math.min(getBoundsArea(candidateBounds), getBoundsArea(primaryBounds));
-  return overlap > 0 || (minArea > 0 && overlap / minArea > 0.06) || getCenterDistanceMeters(candidateBounds, primaryBounds) < 85;
+  return overlap > 0 || (minArea > 0 && overlap / minArea > 0.03) || getCenterDistanceMeters(candidateBounds, primaryBounds) < 135;
 }
 
 function getCompositeDimensions(renderBounds: GeoBounds) {
@@ -896,7 +896,7 @@ export async function buildSolarVisualization(results: AuditResultsBundle): Prom
     }
 
     const sourceResults = await Promise.allSettled(
-      Array.from(insightMap.values()).slice(0, 6).map((insight) => buildSolarSource(insight, key)),
+      Array.from(insightMap.values()).slice(0, 12).map((insight) => buildSolarSource(insight, key)),
     );
     const sources = sourceResults
       .filter((result): result is PromiseFulfilledResult<SolarSource | null> => result.status === "fulfilled")
