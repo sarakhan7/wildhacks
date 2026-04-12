@@ -64,7 +64,7 @@ type LayerState = {
   roofUniforms: Record<string, THREE.IUniform<unknown>> | null;
   wallUniforms: Array<Record<string, THREE.IUniform<unknown>>>;
   particleUniforms: Record<string, THREE.IUniform<unknown>> | null;
-  footprints: LocalPoint[][];
+  parts: Array<{ ring: LocalPoint[], height: number }>;
   footprintLimits: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
   hoveredKey: string;
 };
@@ -89,7 +89,7 @@ function createEmptyLayerState(): LayerState {
     roofUniforms: null,
     wallUniforms: [],
     particleUniforms: null,
-    footprints: [],
+    parts: [],
     footprintLimits: null,
     hoveredKey: "",
   };
@@ -212,7 +212,7 @@ function polygonsTouch(p1: [number, number][], p2: [number, number][]) {
   return false;
 }
 
-function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse): { footprints: LocalPoint[][], bounds: { minX: number, maxX: number, minZ: number, maxZ: number } } | null {
+function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse): { parts: Array<{ ring: LocalPoint[], height: number }>, bounds: { minX: number, maxX: number, minZ: number, maxZ: number } } | null {
   try {
     const point = map.project([data.building.lng, data.building.lat]);
     const rendered = map.queryRenderedFeatures(
@@ -220,26 +220,27 @@ function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse):
       { layers: ["visualization-context-buildings"] },
     );
 
-    const allRings: [number, number][][] = [];
+    const allRings: Array<{ ring: [number, number][], height: number }> = [];
     rendered.forEach(f => {
+      const h = (f.properties && typeof f.properties.height === 'number') ? f.properties.height : data.building.inferredHeightMeters;
       if (f.geometry && f.geometry.type === "Polygon") {
-        allRings.push(f.geometry.coordinates[0] as [number, number][]);
+        allRings.push({ ring: f.geometry.coordinates[0] as [number, number][], height: h });
       } else if (f.geometry && f.geometry.type === "MultiPolygon") {
-        f.geometry.coordinates.forEach(poly => allRings.push(poly[0] as [number, number][]));
+        f.geometry.coordinates.forEach(poly => allRings.push({ ring: poly[0] as [number, number][], height: h }));
       }
     });
 
-    const validRings = allRings.filter(r => r && r.length >= 3);
+    const validRings = allRings.filter(r => r.ring && r.ring.length >= 3);
     if (validRings.length === 0) return null;
 
     let seedIndex = -1;
     let minD = Infinity;
     for (let i = 0; i < validRings.length; i++) {
-        if (pointInGeoRing(data.building.lng, data.building.lat, validRings[i])) {
+        if (pointInGeoRing(data.building.lng, data.building.lat, validRings[i].ring)) {
             seedIndex = i;
             break;
         }
-        const d = distanceToCenter(validRings[i], data.building.lng, data.building.lat);
+        const d = distanceToCenter(validRings[i].ring, data.building.lng, data.building.lat);
         if (d < minD) { minD = d; seedIndex = i; }
     }
 
@@ -251,20 +252,20 @@ function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse):
     while (head < queue.length) {
       const curr = validRings[queue[head++]];
       for (let i = 0; i < validRings.length; i++) {
-        if (!grouped.has(i) && polygonsTouch(curr, validRings[i])) {
+        if (!grouped.has(i) && polygonsTouch(curr.ring, validRings[i].ring)) {
           grouped.add(i);
           queue.push(i);
         }
       }
     }
 
-    const footprints: LocalPoint[][] = [];
+    const parts: Array<{ ring: LocalPoint[], height: number }> = [];
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     
     Array.from(grouped).forEach(i => {
-      const fp = sanitizeFootprint(featureCoordinatesToLocal(validRings[i], data.building.lng, data.building.lat));
+      const fp = sanitizeFootprint(featureCoordinatesToLocal(validRings[i].ring, data.building.lng, data.building.lat));
       if (fp.length >= 3) {
-        footprints.push(fp);
+        parts.push({ ring: fp, height: validRings[i].height });
         fp.forEach(p => {
           if (p.x < minX) minX = p.x;
           if (p.x > maxX) maxX = p.x;
@@ -274,8 +275,8 @@ function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse):
       }
     });
 
-    if (footprints.length === 0) return null;
-    return { footprints, bounds: { minX, maxX, minZ, maxZ } };
+    if (parts.length === 0) return null;
+    return { parts, bounds: { minX, maxX, minZ, maxZ } };
   } catch {
     return null;
   }
@@ -283,10 +284,22 @@ function resolveFootprints(map: mapboxgl.Map, data: VisualizationSceneResponse):
 
 function normalizeGridValues(values: number[]) {
   const finite = values.filter((value) => Number.isFinite(value));
-  const min = Math.min(...finite);
-  const max = Math.max(...finite);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < finite.length; i++) {
+    if (finite[i] < min) min = finite[i];
+    if (finite[i] > max) max = finite[i];
+  }
   const span = Math.max(max - min, 0.0001);
   return values.map((value) => Number(((value - min) / span).toFixed(6)));
+}
+
+function getGridMax(values: number[]) {
+  let peak = -Infinity;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] > peak && Number.isFinite(values[i])) peak = values[i];
+  }
+  return peak === -Infinity ? 1 : peak;
 }
 
 function createTexture(grid: VisualizationGrid, normalized = true) {
@@ -300,8 +313,8 @@ function createTexture(grid: VisualizationGrid, normalized = true) {
   );
   texture.needsUpdate = true;
   texture.flipY = true;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   return texture;
@@ -379,9 +392,11 @@ function createRoofShaderMaterial(
   return { material, uniforms };
 }
 
-function getExteriorEdges(polygons: LocalPoint[][]) {
-  const edges: Record<string, { start: LocalPoint, end: LocalPoint, count: number }> = {};
-  polygons.forEach(poly => {
+function getExteriorEdges(parts: Array<{ ring: LocalPoint[], height: number }>) {
+  const edges: Record<string, { start: LocalPoint, end: LocalPoint, height: number, count: number }> = {};
+  parts.forEach(part => {
+    const poly = part.ring;
+    const h = part.height;
     for (let i = 0; i < poly.length; i++) {
       const p1 = poly[i];
       const p2 = poly[(i + 1) % poly.length];
@@ -393,50 +408,48 @@ function getExteriorEdges(polygons: LocalPoint[][]) {
       const existing = edges[key];
       if (existing) {
         existing.count++;
+        existing.height = Math.max(existing.height, h);
       } else {
-        edges[key] = { start: p1, end: p2, count: 1 };
+        edges[key] = { start: p1, end: p2, height: h, count: 1 };
       }
     }
   });
-  return Object.values(edges).filter((e: any) => e.count <= 1).map((e: any) => ({ start: e.start, end: e.end }));
+  return Object.values(edges).filter((e: any) => e.count <= 1).map((e: any) => ({ start: e.start, end: e.end, height: e.height }));
 }
 
-function createParticleSystem(exteriorEdges: Array<{start: LocalPoint, end: LocalPoint}>, height: number) {
-  const basePositions: number[] = [];
-  const directions: number[] = [];
-  const offsets: number[] = [];
-  const intensities: number[] = [];
-
+function createParticleSystem(exteriorEdges: Array<{start: LocalPoint, end: LocalPoint, height: number}>) {
+  const MaxPlumeHeight = 50.0;
+  
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  
   exteriorEdges.forEach(edge => {
-     const dx = edge.end.x - edge.start.x;
-     const dz = edge.end.z - edge.start.z;
-     const len = Math.hypot(dx, dz);
-     if (len < 0.1) return;
+     const p1 = edge.start;
+     const p2 = edge.end;
+     const dx = p2.x - p1.x;
+     const dz = p2.z - p1.z;
+     if (Math.hypot(dx, dz) < 0.1) return;
      
-     const nx = dz / len;
-     const nz = -dx / len;
+     const yBottom = 0;
+     const yTop = edge.height + MaxPlumeHeight;
      
-     const numParticles = Math.floor(len * height * 0.4);
-     for (let i = 0; i < numParticles; i++) {
-        const t = Math.random();
-        const x = edge.start.x + dx * t;
-        const z = edge.start.z + dz * t;
-        const y = Math.random() * height;
-        const offset = Math.random();
-        const intensity = 0.3 + Math.random() * 0.7;
-        
-        basePositions.push(x, y, z);
-        directions.push(nx * 0.3, 1.0, nz * 0.3);
-        offsets.push(offset);
-        intensities.push(intensity);
-     }
+     const v1 = [p1.x, yTop, p1.z];
+     const v2 = [p2.x, yTop, p2.z];
+     const v3 = [p1.x, yBottom, p1.z];
+     const v4 = [p2.x, yBottom, p2.z];
+     
+     positions.push(...v3, ...v2, ...v1);
+     uvs.push(0, 0,  1, 1,  0, 1);
+     
+     positions.push(...v3, ...v4, ...v2);
+     uvs.push(0, 0,  1, 0,  1, 1);
   });
-
+  
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("basePosition", new THREE.Float32BufferAttribute(basePositions, 3));
-  geometry.setAttribute("direction", new THREE.Float32BufferAttribute(directions, 3));
-  geometry.setAttribute("offset", new THREE.Float32BufferAttribute(offsets, 1));
-  geometry.setAttribute("intensity", new THREE.Float32BufferAttribute(intensities, 1));
+  if (positions.length > 0) {
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  }
 
   const uniforms = {
     uTime: { value: 0 },
@@ -446,84 +459,95 @@ function createParticleSystem(exteriorEdges: Array<{start: LocalPoint, end: Loca
   const material = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
+    side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     uniforms,
     vertexShader: `
-      attribute vec3 basePosition;
-      attribute vec3 direction;
-      attribute float offset;
-      attribute float intensity;
-      uniform float uTime;
-      uniform float uVisible;
-      varying float vIntensity;
-      varying float vAnimation;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
       void main() {
-        float speed = 0.05 + intensity * 0.04;
-        float cycle = fract(uTime * speed + offset);
-        float travelY = cycle * 12.0;
-        
-        vec3 pos = basePosition + direction * travelY;
-        pos.x += sin(cycle * 6.28 + basePosition.y) * 0.5 * cycle;
-        pos.z += cos(cycle * 6.28 + basePosition.x) * 0.5 * cycle;
-        
-        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = (12.0 + intensity * 30.0) * uVisible;
-        
-        vAnimation = smoothstep(0.0, 0.2, cycle) * smoothstep(1.0, 0.6, cycle);
-        vIntensity = intensity;
+        vUv = uv;
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPos = worldPosition.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
       }
     `,
     fragmentShader: `
+      uniform float uTime;
       uniform float uVisible;
-      varying float vIntensity;
-      varying float vAnimation;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      
       void main() {
-        float dist = length(gl_PointCoord - vec2(0.5));
-        if (dist > 0.5) discard;
-        float radial = smoothstep(0.5, 0.1, dist);
+        // Create smooth vertical waving bands
+        float wave = sin(vWorldPos.x * 0.2 + uTime) + cos(vWorldPos.z * 0.2 + uTime * 0.8);
+        float bands = sin(vWorldPos.x * 0.5 + vWorldPos.z * 0.5 + wave + uTime * 2.0);
         
-        vec3 color = mix(vec3(0.0, 0.2, 0.8), vec3(0.9, 0.2, 0.1), vIntensity);
-        gl_FragColor = vec4(color, radial * vAnimation * 0.65 * uVisible);
+        // Smoothly narrow as it goes up
+        float narrowing = smoothstep(1.0, 0.0, vUv.y);
+        float intensity = smoothstep(0.0, 0.8, bands * narrowing);
+        
+        // Base heat gradient (deep red to bright orange)
+        vec3 baseColor = vec3(0.3, 0.0, 0.1);
+        vec3 midColor = vec3(1.0, 0.2, 0.0);
+        vec3 coreColor = vec3(1.0, 0.8, 0.2);
+        
+        vec3 color = mix(baseColor, midColor, smoothstep(0.0, 0.5, intensity));
+        color = mix(color, coreColor, smoothstep(0.5, 1.0, intensity));
+        
+        // Add vertical scanning pulses
+        float pulse = fract(vUv.y * 3.0 - uTime * 0.5);
+        float pulseGlow = smoothstep(0.8, 1.0, pulse) * smoothstep(1.0, 0.0, vUv.y);
+        color += coreColor * pulseGlow * 0.4;
+        
+        // Fade out entirely at top and bottom edges
+        float heightAlpha = smoothstep(0.0, 0.1, vUv.y) * smoothstep(1.0, 0.3, vUv.y);
+        float finalAlpha = (intensity * 0.8 + pulseGlow * 0.2) * heightAlpha * uVisible;
+        
+        gl_FragColor = vec4(color, finalAlpha);
       }
-    `,
+    `
   });
 
-  return {
-    points: new THREE.Points(geometry, material),
-    uniforms,
-  };
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = 3;
+  return { points: mesh, uniforms };
 }
 
-function buildRoofGeometry(footprints: LocalPoint[][], height: number, radius: number) {
-  const shapes: THREE.Shape[] = [];
-  footprints.forEach(fp => {
+function buildRoofGroup(parts: Array<{ ring: LocalPoint[], height: number }>, radius: number, material: THREE.Material) {
+  const meshes: THREE.Mesh[] = [];
+  
+  parts.forEach(part => {
     const shape = new THREE.Shape();
-    fp.forEach((point, index) => {
+    part.ring.forEach((point, index) => {
       if (index === 0) shape.moveTo(point.x, point.z);
       else shape.lineTo(point.x, point.z);
     });
     shape.closePath();
-    shapes.push(shape);
+
+    const geometry = new THREE.ShapeGeometry(shape);
+    const pos = geometry.attributes.position;
+    const uvs = new Float32Array(pos.count * 2);
+    
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getY(i); 
+      uvs[i * 2] = (x + radius) / (2 * radius);
+      uvs[i * 2 + 1] = (z + radius) / (2 * radius);
+    }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate(0, part.height + 0.5, 0);
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.renderOrder = 2;
+    mesh.userData.kind = "roof";
+    mesh.userData.visualization = true;
+    meshes.push(mesh);
   });
 
-  const geometry = new THREE.ShapeGeometry(shapes);
-  const pos = geometry.attributes.position;
-  const uvs = new Float32Array(pos.count * 2);
-  
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getY(i); 
-    uvs[i * 2] = (x + radius) / (2 * radius);
-    uvs[i * 2 + 1] = (z + radius) / (2 * radius);
-  }
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-
-  geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, height + 0.5, 0);
-  geometry.computeVertexNormals();
-  geometry.computeBoundsTree();
-  return geometry;
+  return meshes;
 }
 
 function getMonthlyGrid(solar: SolarVisualization, month: number) {
@@ -567,7 +591,7 @@ function createHoverDetail(
       title: "Roof solar patch",
       detail:
         mask > 0.08
-          ? `Annual flux ${flux.toFixed(1)} kWh/kW/yr equivalent, relative suitability ${(flux / Math.max(...solarGrid.values)).toFixed(2)}.`
+          ? `Annual flux ${flux.toFixed(1)} kWh/kW/yr equivalent, relative suitability ${(flux / getGridMax(solarGrid.values)).toFixed(2)}.`
           : "This roof texel is masked outside the usable Google Solar roof area.",
     };
   }
@@ -637,7 +661,7 @@ export default function MapboxThreeScene({
       };
       layerState.map.on("idle", retryOnIdle);
       const tempFootprint = getRectangleFootprint(data.building.squareFeet, data.building.floors);
-      layerState.footprints = [tempFootprint];
+      layerState.parts = [{ ring: tempFootprint, height: data.building.inferredHeightMeters }];
       layerState.footprintLimits = {
          minX: Math.min(...tempFootprint.map(p => p.x)),
          maxX: Math.max(...tempFootprint.map(p => p.x)),
@@ -646,9 +670,8 @@ export default function MapboxThreeScene({
       };
       return;
     }
-    const { footprints, bounds } = footprintResult;
-    const height = data.building.inferredHeightMeters;
-    layerState.footprints = footprints;
+    const { parts, bounds } = footprintResult;
+    layerState.parts = parts;
     layerState.footprintLimits = bounds;
 
     const roofSolarTexture = createTexture(getMonthlyGrid(data.solar, month), true);
@@ -665,45 +688,46 @@ export default function MapboxThreeScene({
     // Three.js only adds overlay layers: roof heatmap, wall thermal, particles.
 
     // --- Roof overlay (solar + thermal heatmap) ---
-    const radius = data.solar.gridRadiusMeters || 100.0;
-    const roofGeometry = buildRoofGeometry(footprints, height, radius);
+    const radius = data.solar.gridRadiusMeters || 175.0;
     const { material: roofMaterial, uniforms: roofUniforms } = createRoofShaderMaterial(
       roofSolarTexture,
       roofThermalTexture,
       roofMaskTexture,
     );
-    const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
-    roofMesh.renderOrder = 2;
-    roofMesh.userData.kind = "roof";
-    roofMesh.userData.visualization = true;
-    layerState.roofMesh = roofMesh;
+    const roofMeshes = buildRoofGroup(parts, radius, roofMaterial);
+    
+    // Grab first mesh to satisfy singular layerstate properties if necessary somewhere,
+    // though hoverables will take the entire array.
+    layerState.roofMesh = roofMeshes[0] || null;
     layerState.roofUniforms = roofUniforms;
-    layerState.scene.add(roofMesh);
+    roofMeshes.forEach(mesh => layerState.scene?.add(mesh));
 
     // --- Clean edge wireframe for roof only ---
     const edgeGroup = new THREE.Group();
-    const edges = new THREE.EdgesGeometry(roofMesh.geometry);
-    const lines = new THREE.LineSegments(
-      edges,
-      new THREE.LineBasicMaterial({ color: 0x1a7fa8, opacity: 0.35, transparent: true }),
-    );
-    lines.position.copy(roofMesh.position);
-    lines.rotation.copy(roofMesh.rotation);
-    lines.userData.visualization = true;
-    edgeGroup.add(lines);
+    roofMeshes.forEach(mesh => {
+      const edges = new THREE.EdgesGeometry(mesh.geometry);
+      const lines = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: 0x1a7fa8, opacity: 0.35, transparent: true }),
+      );
+      lines.position.copy(mesh.position);
+      lines.rotation.copy(mesh.rotation);
+      lines.userData.visualization = true;
+      edgeGroup.add(lines);
+    });
     edgeGroup.userData.visualization = true;
     layerState.scene.add(edgeGroup);
 
     // --- Particle system (wind flow streamlines) ---
-    const exteriorEdges = getExteriorEdges(footprints);
-    const { points, uniforms: particleUniforms } = createParticleSystem(exteriorEdges, height);
+    const exteriorEdges = getExteriorEdges(parts);
+    const { points, uniforms: particleUniforms } = createParticleSystem(exteriorEdges);
     points.userData.visualization = true;
-    points.renderOrder = 3;
+    // Note: InstancedMesh doesn't need custom render order normally, but keeps it on top
     layerState.particleSystem = points;
     layerState.particleUniforms = particleUniforms;
     layerState.scene.add(points);
 
-    layerState.hoverables = [roofMesh];
+    layerState.hoverables = [...roofMeshes];
   }, [data, month, thermalSurfaces]);
 
   useEffect(() => {
