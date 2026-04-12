@@ -321,7 +321,7 @@ export default function Audit3DView() {
                 <StatRow label="Heating / Cooling" value={`${analysisResults.heatingPercent}% / ${analysisResults.coolingPercent}%`} />
               </div>
               <div className="mt-4 rounded-[1.4rem] border border-[rgba(160,40,40,0.18)] bg-[rgba(160,40,40,0.07)] px-4 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-                This thermal layer is a stylized interpretation of modeled envelope loss using PRISM, weather normalization, and building metadata. It is not CFD.
+                This thermal layer blends modeled envelope loss with facade streamlines and entrance hotspots sourced from OpenStreetMap when available. It remains a stylized engineering view, not CFD.
               </div>
             </GlassCard>
 

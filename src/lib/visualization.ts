@@ -9,6 +9,13 @@ export type VisualizationGrid = {
   values: number[];
 };
 
+export type GeoBounds = {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+};
+
 export type VisualizationBuilding = {
   lat: number;
   lng: number;
@@ -24,10 +31,27 @@ export type SolarSegmentStat = {
   sunshineQuantiles: number[];
 };
 
+export type SolarSourceBuilding = {
+  id: string;
+  bounds: GeoBounds;
+  center: {
+    lat: number;
+    lng: number;
+  };
+};
+
 export type SolarVisualization = {
   source: "google_solar" | "modeled_fallback";
   imageryDate: { year: number; month: number; day: number } | null;
   imageryProcessedDate: { year: number; month: number; day: number } | null;
+  gridBounds: GeoBounds;
+  buildingBounds: GeoBounds | null;
+  renderBounds: GeoBounds;
+  solarGrid: VisualizationGrid;
+  observedSolarGrid: VisualizationGrid;
+  coverageGrid: VisualizationGrid;
+  confidenceGrid: VisualizationGrid;
+  sourceBuildings: SolarSourceBuilding[];
   roofStats: {
     areaMeters2: number;
     groundAreaMeters2: number;
@@ -41,8 +65,18 @@ export type SolarVisualization = {
   roofSegmentStats: SolarSegmentStat[];
   annualFluxGrid: VisualizationGrid;
   monthlyFluxGrids: Array<VisualizationGrid & { month: number }>;
+  observedMonthlyFluxGrids: Array<VisualizationGrid & { month: number }>;
   roofMaskGrid: VisualizationGrid;
   gridRadiusMeters?: number;
+};
+
+export type VisualizationEntrance = {
+  lat: number;
+  lng: number;
+  kind: string;
+  access: string | null;
+  door: string | null;
+  name: string | null;
 };
 
 export type VisualizationSurfaceKind =
@@ -77,6 +111,7 @@ export type VisualizationSceneResponse = {
   building: VisualizationBuilding;
   solar: SolarVisualization;
   thermal: ThermalVisualization;
+  entrances: VisualizationEntrance[];
 };
 
 const ROOF_GRID = { cols: 32, rows: 32 };

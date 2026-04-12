@@ -136,10 +136,10 @@ export default function Home() {
                   Start free audit
                 </Link>
                 <Link
-                  href="/report?demo=1"
+                  href="/audit"
                   className="btn-secondary border-white/35 bg-white/12 px-8 py-4 text-[1rem] text-white hover:bg-white/20"
                 >
-                  See a sample report <ArrowRight className="h-4 w-4" />
+                  Run the live demo <ArrowRight className="h-4 w-4" />
                 </Link>
               </div>
             </div>
