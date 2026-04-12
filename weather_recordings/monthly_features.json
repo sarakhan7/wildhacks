@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-04-12T03:16:26.323017+00:00",
+  "recorded_at": "2026-04-12T03:27:52.025302+00:00",
   "months": [
     "2025-01",
     "2025-02",
@@ -17,111 +17,111 @@
   "features": [
     {
       "month": "2025-01",
-      "avg_temp_f": 22.48,
-      "hdd": 1318.0,
+      "avg_temp_f": 44.65,
+      "hdd": 25.44,
       "cdd": 0.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-02",
-      "avg_temp_f": 26.73,
-      "hdd": 1071.5,
+      "avg_temp_f": 46.7,
+      "hdd": 22.87,
       "cdd": 0.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-03",
-      "avg_temp_f": 43.23,
-      "hdd": 675.0,
+      "avg_temp_f": 52.32,
+      "hdd": 15.85,
       "cdd": 0.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-04",
-      "avg_temp_f": 49.25,
-      "hdd": 475.0,
-      "cdd": 2.5,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "avg_temp_f": 60.0,
+      "hdd": 6.25,
+      "cdd": 0.0,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-05",
-      "avg_temp_f": 56.5,
-      "hdd": 280.5,
-      "cdd": 17.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "avg_temp_f": 67.68,
+      "hdd": 0.0,
+      "cdd": 3.35,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-06",
-      "avg_temp_f": 72.83,
-      "hdd": 23.0,
-      "cdd": 258.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "avg_temp_f": 73.3,
+      "hdd": 0.0,
+      "cdd": 10.37,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-07",
-      "avg_temp_f": 76.66,
+      "avg_temp_f": 75.35,
       "hdd": 0.0,
-      "cdd": 361.5,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "cdd": 12.94,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-08",
-      "avg_temp_f": 73.21,
-      "hdd": 9.5,
-      "cdd": 264.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "avg_temp_f": 73.3,
+      "hdd": 0.0,
+      "cdd": 10.37,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-09",
-      "avg_temp_f": 68.25,
-      "hdd": 36.5,
-      "cdd": 134.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "avg_temp_f": 67.68,
+      "hdd": 0.0,
+      "cdd": 3.35,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-10",
-      "avg_temp_f": 57.26,
-      "hdd": 283.0,
-      "cdd": 43.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "avg_temp_f": 60.0,
+      "hdd": 6.25,
+      "cdd": 0.0,
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-11",
-      "avg_temp_f": 41.5,
-      "hdd": 705.0,
+      "avg_temp_f": 52.32,
+      "hdd": 15.85,
       "cdd": 0.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     },
     {
       "month": "2025-12",
-      "avg_temp_f": 26.61,
-      "hdd": 1190.0,
+      "avg_temp_f": 46.7,
+      "hdd": 22.87,
       "cdd": 0.0,
-      "station_id": "GHCND:USW00004838",
-      "station_name": "CHICAGO PALWAUKEE AIRPORT, IL US",
-      "source": "noaa"
+      "station_id": "fallback-5a",
+      "station_name": "5A climate fallback",
+      "source": "climate_zone_fallback"
     }
   ]
 }

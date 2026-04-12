@@ -44,7 +44,7 @@ type DataLayersResponse = {
   maskUrl?: string;
 };
 
-const SOLAR_GRID_SIZE = 32;
+const SOLAR_GRID_SIZE = 64;
 
 function getSolarApiKey() {
   return process.env.GOOGLE_SOLAR_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";
@@ -134,10 +134,41 @@ function buildFallbackSolar(results: AuditResultsBundle): SolarVisualization {
     for (let col = 0; col < SOLAR_GRID_SIZE; col += 1) {
       const nx = col / (SOLAR_GRID_SIZE - 1);
       const ny = row / (SOLAR_GRID_SIZE - 1);
-      const radial = 1 - Math.hypot(nx - 0.5, ny - 0.5) * 1.25;
-      const ripple = Math.sin(nx * Math.PI * 2.2) * 0.08 + Math.cos(ny * Math.PI * 2.8) * 0.06;
-      annualValues.push(Number((Math.max(0, radial + ripple) * 850 * latBias + 320).toFixed(3)));
-      maskValues.push(nx > 0.08 && nx < 0.92 && ny > 0.08 && ny < 0.92 ? 1 : 0);
+
+      // Simulate realistic roof irradiance with ridge lines and segments
+      const centerDist = Math.hypot(nx - 0.5, ny - 0.5);
+      const radial = Math.max(0, 1 - centerDist * 1.6);
+
+      // Roof ridge line (bright center line)
+      const ridgeLine = Math.exp(-Math.pow((ny - 0.48) * 8, 2)) * 0.35;
+
+      // Roof segments with different pitches (like the reference image)
+      const segSouth = ny > 0.48 ? Math.cos((ny - 0.48) * Math.PI * 1.1) * 0.4 : 0;
+      const segNorth = ny <= 0.48 ? Math.cos((0.48 - ny) * Math.PI * 1.3) * 0.25 : 0;
+
+      // Edge shadows and obstructions
+      const edgeFalloff = Math.min(
+        Math.min(nx, 1 - nx) * 4,
+        Math.min(ny, 1 - ny) * 4,
+      );
+      const edgePenalty = Math.min(1, edgeFalloff);
+
+      // Random-ish structural features (HVAC units, skylights)
+      const feature1 = Math.exp(-Math.pow((nx - 0.25) * 12, 2) - Math.pow((ny - 0.3) * 12, 2)) * -0.5;
+      const feature2 = Math.exp(-Math.pow((nx - 0.7) * 10, 2) - Math.pow((ny - 0.65) * 10, 2)) * -0.3;
+
+      // High-frequency texture
+      const texture = Math.sin(nx * Math.PI * 5.3) * Math.cos(ny * Math.PI * 4.7) * 0.08 +
+        Math.sin((nx + ny) * Math.PI * 7.1) * 0.05;
+
+      const intensity = (radial * 0.5 + ridgeLine + segSouth + segNorth + feature1 + feature2 + texture) * edgePenalty;
+      const flux = Math.max(0, intensity) * 850 * latBias + 200;
+      annualValues.push(Number(flux.toFixed(3)));
+
+      // More realistic mask shape: stronger inset at edges
+      const maskEdge = 0.12;
+      const inRoof = nx > maskEdge && nx < (1 - maskEdge) && ny > maskEdge && ny < (1 - maskEdge);
+      maskValues.push(inRoof ? 1 : 0);
     }
   }
 

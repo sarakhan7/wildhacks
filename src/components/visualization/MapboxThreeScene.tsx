@@ -183,42 +183,153 @@ function distanceToCenter(ring: [number, number][], lng: number, lat: number) {
   return Math.hypot(centroid.lng - lng, centroid.lat - lat);
 }
 
+function geoRingArea(ring: [number, number][]): number {
+  let area = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const j = (i + 1) % ring.length;
+    area += ring[i][0] * ring[j][1];
+    area -= ring[j][0] * ring[i][1];
+  }
+  return Math.abs(area) / 2;
+}
+
+function pointInGeoRing(lng: number, lat: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Extract ALL polygon rings from a feature (handles MultiPolygon properly) */
+function extractAllFeatureRings(feature: mapboxgl.MapboxGeoJSONFeature): [number, number][][] {
+  if (!feature.geometry) return [];
+  if (feature.geometry.type === "Polygon") {
+    return [feature.geometry.coordinates[0] as [number, number][]];
+  }
+  if (feature.geometry.type === "MultiPolygon") {
+    return feature.geometry.coordinates.map((poly) => poly[0] as [number, number][]);
+  }
+  return [];
+}
+
+/** Convex hull (Andrew's monotone chain) */
+function convexHull(points: [number, number][]): [number, number][] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (sorted.length <= 2) return sorted;
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: [number, number][] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: [number, number][] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  upper.pop();
+  lower.pop();
+  return lower.concat(upper);
+}
+
+/** Check if two bounding boxes overlap (with a small tolerance) */
+function bboxOverlap(a: [number, number][], b: [number, number][], tol = 0.00008): boolean {
+  const aMinX = Math.min(...a.map((p) => p[0])) - tol;
+  const aMaxX = Math.max(...a.map((p) => p[0])) + tol;
+  const aMinY = Math.min(...a.map((p) => p[1])) - tol;
+  const aMaxY = Math.max(...a.map((p) => p[1])) + tol;
+  const bMinX = Math.min(...b.map((p) => p[0]));
+  const bMaxX = Math.max(...b.map((p) => p[0]));
+  const bMinY = Math.min(...b.map((p) => p[1]));
+  const bMaxY = Math.max(...b.map((p) => p[1]));
+  return aMaxX >= bMinX && bMaxX >= aMinX && aMaxY >= bMinY && bMaxY >= aMinY;
+}
+
 function resolveFootprint(map: mapboxgl.Map, data: VisualizationSceneResponse): LocalPoint[] | null {
   try {
-    // Strategy 1: queryRenderedFeatures at the building pin
     const point = map.project([data.building.lng, data.building.lat]);
+    // Query a very wide area to capture all parts of complex buildings
     const rendered = map.queryRenderedFeatures(
-      [[point.x - 40, point.y - 40], [point.x + 40, point.y + 40]],
+      [[point.x - 120, point.y - 120], [point.x + 120, point.y + 120]],
       { layers: ["visualization-context-buildings"] },
     );
+
     if (rendered.length > 0) {
-      const best = rendered
-        .map((f) => ({ ring: extractFeatureRing(f), feature: f }))
-        .filter((e): e is { ring: [number, number][]; feature: mapboxgl.MapboxGeoJSONFeature } => Boolean(e.ring) && e.ring.length >= 3)
-        .sort((a, b) => distanceToCenter(a.ring, data.building.lng, data.building.lat) - distanceToCenter(b.ring, data.building.lng, data.building.lat))[0];
-      if (best) {
-        const fp = sanitizeFootprint(featureCoordinatesToLocal(best.ring, data.building.lng, data.building.lat));
+      // Collect all rings from all features
+      type Entry = { rings: [number, number][][]; feature: mapboxgl.MapboxGeoJSONFeature };
+      const allEntries: Entry[] = rendered
+        .map((f) => ({ rings: extractAllFeatureRings(f), feature: f }))
+        .filter((e) => e.rings.length > 0 && e.rings.some((r) => r.length >= 3));
+
+      // Find the feature/ring containing the building pin
+      let seedRing: [number, number][] | null = null;
+      for (const entry of allEntries) {
+        for (const ring of entry.rings) {
+          if (ring.length >= 3 && pointInGeoRing(data.building.lng, data.building.lat, ring)) {
+            seedRing = ring;
+            break;
+          }
+        }
+        if (seedRing) break;
+      }
+
+      if (!seedRing) {
+        // Fallback: pick largest ring
+        const flatRings = allEntries.flatMap((e) => e.rings).filter((r) => r.length >= 3);
+        flatRings.sort((a, b) => geoRingArea(b) - geoRingArea(a));
+        seedRing = flatRings[0] ?? null;
+      }
+
+      if (seedRing) {
+        // Merge all adjacent features that share bounding box overlap with the seed
+        const allRings = allEntries.flatMap((e) => e.rings).filter((r) => r.length >= 3);
+        const merged: [number, number][] = [...seedRing];
+        const used = new Set<number>([allRings.indexOf(seedRing)]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (let i = 0; i < allRings.length; i++) {
+            if (used.has(i)) continue;
+            // Check if this ring's bbox overlaps with any already-merged ring
+            if (bboxOverlap(merged, allRings[i])) {
+              merged.push(...allRings[i]);
+              used.add(i);
+              changed = true;
+            }
+          }
+        }
+
+        // If we have >1 ring merged, compute convex hull; otherwise use the seed ring as-is
+        const hull = used.size > 1 ? convexHull(merged) : seedRing;
+        const fp = sanitizeFootprint(featureCoordinatesToLocal(hull, data.building.lng, data.building.lat));
         if (fp.length >= 3) return fp;
       }
     }
 
-    // Strategy 2: querySourceFeatures from composite source
+    // Fallback: querySourceFeatures
     const sourceFeatures = map.querySourceFeatures("composite", { sourceLayer: "building" });
     const candidates = sourceFeatures
       .filter((feature) => feature.properties?.extrude === "true" || feature.properties?.extrude === true)
-      .map((feature) => ({ ring: extractFeatureRing(feature), feature }))
-      .filter((entry): entry is { ring: [number, number][]; feature: mapboxgl.MapboxGeoJSONFeature } => Boolean(entry.ring))
-      .filter((entry) => entry.ring.length >= 3);
+      .map((feature) => ({ rings: extractAllFeatureRings(feature), feature }))
+      .filter((entry) => entry.rings.length > 0);
 
     if (candidates.length > 0) {
-      const nearest = candidates.sort(
-        (a, b) => distanceToCenter(a.ring, data.building.lng, data.building.lat) - distanceToCenter(b.ring, data.building.lng, data.building.lat),
-      )[0];
-      const footprint = sanitizeFootprint(featureCoordinatesToLocal(nearest.ring, data.building.lng, data.building.lat));
-      if (footprint.length >= 3) return footprint;
+      const flatRings = candidates.flatMap((c) => c.rings).filter((r) => r.length >= 3);
+      const containing = flatRings.find((r) => pointInGeoRing(data.building.lng, data.building.lat, r));
+      const best = containing || flatRings.sort((a, b) => geoRingArea(b) - geoRingArea(a))[0];
+      if (best) {
+        const footprint = sanitizeFootprint(featureCoordinatesToLocal(best, data.building.lng, data.building.lat));
+        if (footprint.length >= 3) return footprint;
+      }
     }
 
-    // No building data available yet — signal caller to retry
     return null;
   } catch {
     return null;
@@ -287,16 +398,24 @@ function createRoofShaderMaterial(
       varying vec3 vNormal;
 
       vec3 solarRamp(float t) {
-        return mix(vec3(0.05, 0.16, 0.28), vec3(0.98, 0.72, 0.2), smoothstep(0.0, 1.0, t));
+        float s = clamp(t, 0.0, 1.0);
+        vec3 low  = vec3(0.18, 0.08, 0.52);  // deep purple for low irradiance
+        vec3 mid  = vec3(0.92, 0.45, 0.12);  // orange for medium
+        vec3 high = vec3(1.0,  0.92, 0.2);   // bright yellow for high
+        return s < 0.5 ? mix(low, mid, s * 2.0) : mix(mid, high, (s - 0.5) * 2.0);
       }
 
       vec3 thermalRamp(float t) {
-        return mix(vec3(0.02, 0.18, 0.28), vec3(0.98, 0.34, 0.12), smoothstep(0.0, 1.0, t));
+        float s = clamp(t, 0.0, 1.0);
+        vec3 cool = vec3(0.05, 0.22, 0.38);
+        vec3 warm = vec3(0.85, 0.25, 0.08);
+        vec3 hot  = vec3(1.0,  0.08, 0.02);
+        return s < 0.5 ? mix(cool, warm, s * 2.0) : mix(warm, hot, (s - 0.5) * 2.0);
       }
 
       void main() {
         float mask = texture2D(uMask, vUv).r;
-        if (mask < 0.08) discard;
+        if (mask < 0.05) discard;
         float solar = texture2D(uSolar, vUv).r;
         float thermal = texture2D(uThermal, vUv).r;
         vec3 solarColor = solarRamp(solar);
@@ -304,10 +423,14 @@ function createRoofShaderMaterial(
         vec3 baseColor = uOverlayMode < 0.5 ? solarColor : uOverlayMode < 1.5 ? thermalColor : mix(solarColor, thermalColor, 0.45);
         vec3 lightDir = normalize(vec3(0.4, 0.85, 0.3));
         float shade = 0.55 + max(dot(normalize(vNormal), lightDir), 0.0) * 0.45;
-        gl_FragColor = vec4(baseColor * shade, uOpacity);
+        gl_FragColor = vec4(baseColor * shade, uOpacity * 0.92);
       }
     `,
   });
+
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -2;
+  material.polygonOffsetUnits = -2;
 
   return { material, uniforms };
 }
@@ -346,10 +469,14 @@ function createWallShaderMaterial(thermalTexture: THREE.DataTexture) {
         vec3 color = thermalRamp(thermal);
         vec3 lightDir = normalize(vec3(0.3, 0.9, 0.28));
         float shade = 0.48 + max(dot(normalize(vNormal), lightDir), 0.0) * 0.4;
-        gl_FragColor = vec4(color * shade, uVisible);
+        gl_FragColor = vec4(color * shade, uVisible * 0.88);
       }
     `,
   });
+
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -1;
+  material.polygonOffsetUnits = -1;
 
   return { material, uniforms };
 }
@@ -541,13 +668,13 @@ function createWallMesh(
   const dz = end.z - start.z;
   const angle = Math.atan2(dz, dx);
   const len = Math.hypot(dx, dz);
-  // Offset wall 0.2m outward to prevent z-fighting with building body
+  // Offset wall 0.5m outward to prevent z-fighting with building body and Mapbox extrusion
   const normalX = len > 0 ? dz / len : 0;
   const normalZ = len > 0 ? -dx / len : 0;
   const midpoint = new THREE.Vector3(
-    (start.x + end.x) / 2 + normalX * 0.2,
+    (start.x + end.x) / 2 + normalX * 0.5,
     height / 2,
-    (start.z + end.z) / 2 + normalZ * 0.2,
+    (start.z + end.z) / 2 + normalZ * 0.5,
   );
   geometry.computeBoundsTree();
 
@@ -699,7 +826,11 @@ export default function MapboxThreeScene({
       opacity: 0.82,
       side: THREE.DoubleSide,
     });
+    bodyMaterial.polygonOffset = true;
+    bodyMaterial.polygonOffsetFactor = -1;
+    bodyMaterial.polygonOffsetUnits = -1;
     const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    bodyMesh.renderOrder = 1;
     bodyMesh.userData.visualization = true;
     layerState.scene.add(bodyMesh);
 
@@ -711,26 +842,51 @@ export default function MapboxThreeScene({
       roofMaskTexture,
     );
     const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
+    roofMesh.renderOrder = 2;
     roofMesh.userData.kind = "roof";
     roofMesh.userData.visualization = true;
     layerState.roofMesh = roofMesh;
     layerState.roofUniforms = roofUniforms;
     layerState.scene.add(roofMesh);
 
-    // --- Thermal wall overlays (offset outward from body) ---
+    // --- Thermal wall overlays ---
+    // Pick 4 longest edges from the footprint and assign compass directions based on angle
+    const edges: Array<{ start: LocalPoint; end: LocalPoint; length: number; angle: number }> = [];
+    for (let i = 0; i < footprint.length; i++) {
+      const s = footprint[i];
+      const e = footprint[(i + 1) % footprint.length];
+      const edgeLen = Math.hypot(e.x - s.x, e.z - s.z);
+      const edgeAngle = Math.atan2(e.z - s.z, e.x - s.x);
+      edges.push({ start: s, end: e, length: edgeLen, angle: edgeAngle });
+    }
+    // Sort by length and take up to 4 longest
+    const longestEdges = [...edges].sort((a, b) => b.length - a.length).slice(0, 4);
+    // Map each edge to compass direction based on its outward normal angle
+    const assignedKinds: Array<{ edge: typeof edges[0]; kind: string }> = longestEdges.map((edge) => {
+      // Normal angle is perpendicular to edge direction
+      const normalAngle = edge.angle - Math.PI / 2;
+      const normDeg = ((normalAngle * 180 / Math.PI) % 360 + 360) % 360;
+      let kind = "north_wall";
+      if (normDeg >= 45 && normDeg < 135) kind = "west_wall";
+      else if (normDeg >= 135 && normDeg < 225) kind = "south_wall";
+      else if (normDeg >= 225 && normDeg < 315) kind = "east_wall";
+      return { edge, kind };
+    });
+
     const wallMeshes: THREE.Mesh[] = [];
     const wallUniforms: Array<Record<string, THREE.IUniform<unknown>>> = [];
     const wallThermalTextures: Partial<Record<string, THREE.DataTexture>> = {};
-    const kinds = ["north_wall", "east_wall", "south_wall", "west_wall"] as const;
-    for (let i = 0; i < Math.min(footprint.length, 4); i += 1) {
-      const start = footprint[i];
-      const end = footprint[(i + 1) % footprint.length];
-      const kind = kinds[i % kinds.length];
-      const surface = thermalSurfaces.find((entry) => entry.kind === kind);
+    const usedKinds = new Set<string>();
+    for (const { edge, kind } of assignedKinds) {
+      // Don't assign same kind twice
+      const actualKind = usedKinds.has(kind) ? [...["north_wall","east_wall","south_wall","west_wall"] as const].find((k) => !usedKinds.has(k)) ?? kind : kind;
+      usedKinds.add(actualKind);
+      const surface = thermalSurfaces.find((entry) => entry.kind === actualKind);
       if (!surface) continue;
       const thermalTexture = createThermalGridTexture(surface);
-      wallThermalTextures[kind] = thermalTexture;
-      const { mesh, uniforms } = createWallMesh(kind, start, end, height, thermalTexture);
+      wallThermalTextures[actualKind] = thermalTexture;
+      const { mesh, uniforms } = createWallMesh(actualKind, edge.start, edge.end, height, thermalTexture);
+      mesh.renderOrder = 3;
       mesh.userData.visualization = true;
       layerState.scene.add(mesh);
       wallMeshes.push(mesh);
