@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { AuditTerminal } from "@/components/site/AuditTerminal";
+import { TypewriterCycle } from "@/components/ui/TypewriterCycle";
 
 const stats = [
   { value: "$15K–$50K", label: "Traditional audit cost" },
@@ -121,8 +122,16 @@ export default function Home() {
                 <br />
                 is wasting
                 <br />
-                <span className="block font-main text-[0.84em] font-light italic tracking-[-0.06em] text-light-blue">
-                  $47,000 a year.
+                <span className="block whitespace-nowrap font-main text-[0.84em] font-light italic tracking-[-0.06em] text-light-blue">
+                  <span className="sr-only">$47,000 a year.</span>
+                  <span aria-hidden="true">
+                    $
+                    <TypewriterCycle
+                      values={["47,000", "200,000", "13,000"]}
+                      className="inline-flex min-w-[6ch] items-center"
+                    />
+                    &nbsp;a year.
+                  </span>
                 </span>
               </h1>
 
