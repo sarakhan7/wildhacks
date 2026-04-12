@@ -101,7 +101,7 @@ export default function Home() {
         <div className="hero-cloud left-[24%] top-[28%] h-[11rem] w-[19rem] opacity-40" />
         <div className="hero-cloud right-[24%] top-[18%] h-[13rem] w-[21rem] opacity-35" />
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[128px]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[134px]">
           <Image
             src="/city-skyline.png"
             alt="City skyline backdrop"
@@ -116,11 +116,6 @@ export default function Home() {
         <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-6 pb-20 pt-32 sm:pt-36">
           <div className="grid flex-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(360px,560px)] lg:items-center">
             <div className="max-w-3xl pt-10 lg:pt-24">
-              <div className="glass-small mb-8 inline-flex items-center gap-3 px-5 py-3">
-                <span className="inline-block h-3 w-3 rounded-full bg-success dot-pulse" />
-                <span className="text-sm font-medium text-navy/85">Free energy audit · 10 minutes</span>
-              </div>
-
               <h1 className="display-title max-w-4xl text-white [text-shadow:0_6px_32px_rgba(0,0,0,0.28)]">
                 Your building
                 <br />
@@ -224,18 +219,18 @@ export default function Home() {
 
       <section className="relative overflow-hidden bg-[var(--gradient-footer)]">
         <div className="mx-auto max-w-5xl px-6 py-20 text-center text-white">
-          <h2 className="section-title text-white">
+          <h2 className="section-title text-navy">
             Stop guessing.
-            <span className="block text-sky-300">Start saving.</span>
+            <span className="block text-mid-navy">Start saving.</span>
           </h2>
-          <p className="mx-auto mt-6 max-w-2xl text-lg font-light leading-8 text-white/70">
-            Your free energy audit is 10 minutes away. Upload your bills and let AuditAI do the rest.
+          <p className="mx-auto mt-6 max-w-2xl text-lg font-light leading-8 text-navy">
+            Upload your bills and let AuditAI do the rest.
           </p>
           <Link href="/audit" className="btn-primary mt-10 px-9 py-4 text-[1rem]">
             Start your free audit <ArrowRight className="h-4 w-4" />
           </Link>
 
-          <div className="mt-16 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-white/35">
+          <div className="mt-16 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-mid-navy">
             © 2026 AuditAI · Free automated energy audits
           </div>
         </div>

@@ -45,15 +45,13 @@
   --shadow-glow-warm: 0 0 36px rgba(200, 120, 48, 0.18);
   --shadow-glow-cool: 0 0 32px rgba(74, 159, 212, 0.16);
 
-  --gradient-sky: linear-gradient(
-    168deg,
-    #daeaf5 0%,
-    #ccdceb 18%,
-    #b7cfe0 38%,
-    #9dbdd3 58%,
-    #7ca2be 78%,
-    #6189ab 100%
-  );
+  --gradient-sky: linear-gradient(168deg,
+      #C4D4E2 0%,
+      #C4D4E2 18%,
+      #C4D4E2 38%,
+      #C4D4E2 58%,
+      #C4D4E2 78%,
+      #C4D4E2 100%);
   --gradient-footer: linear-gradient(180deg, rgba(7, 16, 29, 0.92) 0%, rgba(7, 16, 29, 0.98) 100%);
 
   --font-main: "Inter", sans-serif;
@@ -117,10 +115,9 @@ body::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 12% 16%, rgba(255, 255, 255, 0.65) 0%, transparent 22%),
-    radial-gradient(circle at 88% 14%, rgba(255, 255, 255, 0.45) 0%, transparent 18%),
-    radial-gradient(circle at 50% 8%, rgba(255, 255, 255, 0.3) 0%, transparent 16%);
+  background: #C4D4E2;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 120px, transparent 280px);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 120px, transparent 280px);
   background-repeat: no-repeat;
   background-size: cover;
 }
@@ -280,30 +277,31 @@ img {
 
 .city-overlay {
   background:
-    linear-gradient(
-      to bottom,
-      rgba(214, 230, 241, 0.96) 0%,
-      rgba(188, 208, 224, 0.82) 14%,
-      rgba(117, 143, 165, 0.24) 38%,
-      transparent 52%,
+    linear-gradient(to bottom,
+      rgba(201, 218, 231, 0.96) 0%,
+      rgba(201, 218, 231, 0.78) 13%,
+      rgba(188, 208, 224, 0.56) 30%,
+      rgba(117, 143, 165, 0.2) 46%,
+      transparent 60%,
       rgba(7, 16, 29, 0.44) 76%,
-      rgba(7, 16, 29, 0.92) 100%
-    );
+      rgba(7, 16, 29, 0.92) 100%);
 }
 
 .hero-cloud {
   position: absolute;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(201, 218, 231, 0.56);
   filter: blur(44px);
   pointer-events: none;
 }
 
 @keyframes pulse-green {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 rgba(26, 96, 64, 0.45);
   }
+
   50% {
     box-shadow: 0 0 0 6px rgba(26, 96, 64, 0);
   }
@@ -314,10 +312,12 @@ img {
 }
 
 @keyframes blink {
+
   0%,
   50% {
     opacity: 1;
   }
+
   51%,
   100% {
     opacity: 0;
@@ -333,10 +333,12 @@ img {
     transform: translateY(0);
     opacity: 1;
   }
+
   70% {
     transform: translateY(16px);
     opacity: 0.25;
   }
+
   100% {
     transform: translateY(0);
     opacity: 1;
@@ -348,10 +350,12 @@ img {
 }
 
 @keyframes pulse-glow {
+
   0%,
   100% {
     opacity: 0.55;
   }
+
   50% {
     opacity: 1;
   }

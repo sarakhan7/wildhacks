@@ -26,11 +26,6 @@ export function Navbar() {
           <span className="text-mid-navy">AI</span>
         </Link>
 
-        <div className="hidden items-center gap-2 font-mono text-[0.68rem] text-[var(--text-muted)] md:flex">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-success dot-pulse" />
-          <span>live · 3 buildings analyzed today</span>
-        </div>
-
         <div className="hidden flex-1 items-center justify-end gap-6 md:flex">
           {marketingLinks.map((link) => (
             <Link
