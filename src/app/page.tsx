@@ -1,15 +1,15 @@
 "use client";
 
+import { motion } from "framer-motion";
+import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 
 import { AuditTerminal } from "@/components/site/AuditTerminal";
-import { TypewriterCycle } from "@/components/ui/TypewriterCycle";
-import { AnimateIn, StaggerGrid, StaggerItem } from "@/components/ui/AnimateIn";
 import { IntroOverlay } from "@/components/site/IntroOverlay";
+import { AnimateIn, StaggerGrid, StaggerItem } from "@/components/ui/AnimateIn";
+import { TypewriterCycle } from "@/components/ui/TypewriterCycle";
 
 const stats = [
   { value: "$15K–$50K", label: "Traditional audit cost" },
@@ -80,6 +80,18 @@ const features = [
     tag: "visualization",
     title: "3D Digital Twin",
     desc: "Explore your interactive 3D audit with precision solar potential heatmaps and volumetric plumes showing heat loss.",
+  },
+  {
+    num: "07",
+    tag: "assistant",
+    title: "AI Analysis Manager",
+    desc: "Voice-assisted AI support to explore building data and audit insights through natural conversation.",
+  },
+  {
+    num: "08",
+    tag: "visualization",
+    title: "3D Digital Twin",
+    desc: "Layer solar production and thermal flux onto an interactive 3D model for intuitive building insights.",
   },
 ];
 
