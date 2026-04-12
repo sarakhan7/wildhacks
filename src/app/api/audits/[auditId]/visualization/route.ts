@@ -24,7 +24,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ aud
   const entrances = await fetchVisualizationEntrances(
     results.building.lat,
     results.building.lng,
-    solar.buildingBounds,
+    solar.renderBounds ?? solar.buildingBounds,
   );
 
   return NextResponse.json(buildVisualizationResponse(results, solar, thermal, entrances), {

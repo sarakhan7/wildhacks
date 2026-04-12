@@ -809,7 +809,6 @@ function buildVisualizationFromSources(
     };
   });
   const observedMonthlyFluxGrids = monthlyComposites.map((monthlyComposite, index) => {
-    const monthlyComposite = composeGridForMonth(sources, renderBounds, width, height, index + 1);
     return {
       month: index + 1,
       ...monthlyComposite.observedSolarGrid,

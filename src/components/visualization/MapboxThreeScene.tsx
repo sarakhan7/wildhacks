@@ -72,6 +72,7 @@ type LayerState = {
   anchor: mapboxgl.MercatorCoordinate | null;
   meterScale: number;
   roofSolarTexture: THREE.DataTexture | null;
+  roofObservedTexture: THREE.DataTexture | null;
   roofCoverageTexture: THREE.DataTexture | null;
   roofConfidenceTexture: THREE.DataTexture | null;
   roofThermalTexture: THREE.DataTexture | null;
@@ -81,6 +82,7 @@ type LayerState = {
   particleUniforms: Record<string, THREE.IUniform<unknown>> | null;
   displayRoofGrids: {
     solarGrid: VisualizationGrid;
+    observedSolarGrid: VisualizationGrid;
     coverageGrid: VisualizationGrid;
     confidenceGrid: VisualizationGrid;
     renderBounds: GeoBounds;
@@ -104,6 +106,7 @@ function createEmptyLayerState(): LayerState {
     anchor: null,
     meterScale: 1,
     roofSolarTexture: null,
+    roofObservedTexture: null,
     roofCoverageTexture: null,
     roofConfidenceTexture: null,
     roofThermalTexture: null,
@@ -437,12 +440,14 @@ function resolveWallKind(normal: LocalPoint): VisualizationSurfaceKind {
 
 function createRoofShaderMaterial(
   solarTexture: THREE.DataTexture,
+  observedTexture: THREE.DataTexture,
   thermalTexture: THREE.DataTexture,
   coverageTexture: THREE.DataTexture,
   confidenceTexture: THREE.DataTexture,
 ) {
   const uniforms = {
     uSolar: { value: solarTexture },
+    uObservedSolar: { value: observedTexture },
     uThermal: { value: thermalTexture },
     uCoverage: { value: coverageTexture },
     uConfidence: { value: confidenceTexture },
@@ -467,6 +472,7 @@ function createRoofShaderMaterial(
     `,
     fragmentShader: `
       uniform sampler2D uSolar;
+      uniform sampler2D uObservedSolar;
       uniform sampler2D uThermal;
       uniform sampler2D uCoverage;
       uniform sampler2D uConfidence;
@@ -478,10 +484,14 @@ function createRoofShaderMaterial(
 
       vec3 solarRamp(float t) {
         float s = clamp(t, 0.0, 1.0);
-        vec3 low  = vec3(0.2, 0.4, 0.9);   // bright blue
-        vec3 mid  = vec3(1.0, 0.85, 0.2);  // yellow
-        vec3 high = vec3(0.95, 0.2, 0.1);  // red
-        return s < 0.5 ? mix(low, mid, s * 2.0) : mix(mid, high, (s - 0.5) * 2.0);
+        vec3 cold = vec3(0.24, 0.18, 0.72);
+        vec3 cool = vec3(0.18, 0.42, 0.95);
+        vec3 warm = vec3(0.98, 0.9, 0.2);
+        vec3 hot = vec3(1.0, 0.36, 0.08);
+        return
+          s < 0.32 ? mix(cold, cool, s / 0.32) :
+          s < 0.7 ? mix(cool, warm, (s - 0.32) / 0.38) :
+          mix(warm, hot, (s - 0.7) / 0.3);
       }
 
       vec3 thermalRamp(float t) {
@@ -495,20 +505,33 @@ function createRoofShaderMaterial(
         float coverage = texture2D(uCoverage, vUv).r;
         float confidence = texture2D(uConfidence, vUv).r;
         float solar = pow(clamp(texture2D(uSolar, vUv).r, 0.0, 1.0), 0.92);
+        float observed = pow(clamp(texture2D(uObservedSolar, vUv).r, 0.0, 1.0), 0.96);
         float thermal = texture2D(uThermal, vUv).r;
         vec3 solarColor = solarRamp(solar);
+        vec3 observedColor = solarRamp(observed);
         vec3 thermalColor = thermalRamp(thermal);
         vec3 softSky = vec3(0.7, 0.75, 0.82);
-        vec3 roofSolar = mix(mix(solarColor, softSky, 0.1), solarColor, smoothstep(0.74, 0.96, confidence));
-        roofSolar += vec3(1.0, 0.93, 0.55) * coverage * 0.025;
+        float detailMask = smoothstep(0.05, 0.32, coverage);
+        vec3 roofSolar = mix(mix(solarColor, softSky, 0.08), solarColor, smoothstep(0.72, 0.96, confidence));
+        roofSolar = mix(roofSolar, observedColor, detailMask * 0.48);
+
+        vec2 gridUv = fract(vUv * vec2(24.0, 24.0));
+        float gridLine = max(
+          1.0 - smoothstep(0.44, 0.5, abs(gridUv.x - 0.5) * 2.0),
+          1.0 - smoothstep(0.44, 0.5, abs(gridUv.y - 0.5) * 2.0)
+        );
+        float detailEdge = clamp(fwidth(observed) * 14.0, 0.0, 1.0);
+        roofSolar += vec3(0.92, 0.98, 1.0) * gridLine * (0.018 + 0.016 * solar);
+        roofSolar += vec3(1.0, 0.96, 0.72) * detailEdge * detailMask * 0.18;
+
         vec3 baseColor =
           uOverlayMode < 0.5
             ? roofSolar
             : uOverlayMode < 1.5
-              ? mix(roofSolar, thermalColor, 0.72)
-              : mix(roofSolar, thermalColor, 0.36);
-        float contour = smoothstep(0.82, 1.0, sin((solar * 8.0 + thermal * 4.8 + vUv.x * 4.0 - vUv.y * 5.0) + uTime * 0.4) * 0.5 + 0.5);
-        baseColor += vec3(1.0, 0.94, 0.55) * contour * confidence * 0.08;
+              ? mix(roofSolar, thermalColor, 0.56)
+              : mix(roofSolar, thermalColor, 0.24);
+        float contour = smoothstep(0.8, 1.0, sin((solar * 9.0 + observed * 7.0 + thermal * 4.4 + vUv.x * 5.5 - vUv.y * 6.0) + uTime * 0.42) * 0.5 + 0.5);
+        baseColor += vec3(1.0, 0.94, 0.55) * contour * confidence * 0.06;
         vec3 lightDir = normalize(vec3(0.4, 0.85, 0.3));
         float shade = 0.55 + max(dot(normalize(vNormal), lightDir), 0.0) * 0.45;
         float alpha = mix(0.88, 0.96, confidence);
@@ -586,12 +609,12 @@ function createWallShaderMaterial(
         }
         float edgeGlow = pow(1.0 - abs(vUv.x * 2.0 - 1.0), 0.6);
         vec3 color = thermalRamp(thermal);
-        color += vec3(1.0, 0.92, 0.62) * hotspotGlow * (0.45 + pulse * 0.35);
-        color += vec3(1.0, 0.7, 0.28) * edgeGlow * 0.08;
+        color += vec3(1.0, 0.92, 0.62) * hotspotGlow * (0.3 + pulse * 0.24);
+        color += vec3(1.0, 0.7, 0.28) * edgeGlow * 0.04;
         float shade = 0.72 + max(dot(normalize(vNormal), normalize(vec3(0.35, 0.8, 0.25))), 0.0) * 0.28;
-        float alpha = (0.18 + thermal * 0.52 + hotspotGlow * 0.44) * uVisible;
+        float alpha = (0.08 + thermal * 0.26 + hotspotGlow * 0.22) * uVisible;
         alpha *= smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.68, vUv.y);
-        gl_FragColor = vec4(color * shade, clamp(alpha, 0.0, 0.92));
+        gl_FragColor = vec4(color * shade, clamp(alpha, 0.0, 0.58));
       }
     `,
   });
@@ -663,6 +686,22 @@ function scaleRectToGrid(
     maxCol: Math.min(target.width - 1, Math.ceil((rect.maxCol / Math.max(1, source.width - 1)) * Math.max(1, target.width - 1))),
     minRow: Math.max(0, Math.floor((rect.minRow / Math.max(1, source.height - 1)) * Math.max(1, target.height - 1))),
     maxRow: Math.min(target.height - 1, Math.ceil((rect.maxRow / Math.max(1, source.height - 1)) * Math.max(1, target.height - 1))),
+  };
+}
+
+function boundsForGridRect(
+  bounds: GeoBounds,
+  grid: VisualizationGrid,
+  rect: { minCol: number; maxCol: number; minRow: number; maxRow: number },
+): GeoBounds {
+  const lngSpan = bounds.east - bounds.west;
+  const latSpan = bounds.north - bounds.south;
+
+  return {
+    west: bounds.west + (rect.minCol / Math.max(grid.width, 1)) * lngSpan,
+    east: bounds.west + ((rect.maxCol + 1) / Math.max(grid.width, 1)) * lngSpan,
+    north: bounds.north - (rect.minRow / Math.max(grid.height, 1)) * latSpan,
+    south: bounds.north - ((rect.maxRow + 1) / Math.max(grid.height, 1)) * latSpan,
   };
 }
 
@@ -864,7 +903,8 @@ function prepareRoofGrids(
   month: number,
 ) {
   return {
-    solarGrid: smoothGrid(getMonthlyGrid(solar, month), 2),
+    solarGrid: smoothGrid(getMonthlyGrid(solar, month), 1),
+    observedSolarGrid: getObservedMonthlyGrid(solar, month),
     coverageGrid: solar.coverageGrid,
     confidenceGrid: solar.confidenceGrid,
     renderBounds: solar.renderBounds,
@@ -874,21 +914,46 @@ function prepareRoofGrids(
 function fitRoofGridsToShell(
   roofGrids: {
     solarGrid: VisualizationGrid;
+    observedSolarGrid: VisualizationGrid;
     coverageGrid: VisualizationGrid;
     confidenceGrid: VisualizationGrid;
     renderBounds: GeoBounds;
   },
   shellBounds: GeoBounds,
 ) {
+  const sourceRect = getGridRectForMask(roofGrids.coverageGrid, 0.08);
+  if (!sourceRect) {
+    return {
+      ...roofGrids,
+      renderBounds: shellBounds,
+    };
+  }
+
+  const scaledSolarRect = scaleRectToGrid(sourceRect, roofGrids.coverageGrid, roofGrids.solarGrid);
+  const scaledObservedRect = scaleRectToGrid(sourceRect, roofGrids.coverageGrid, roofGrids.observedSolarGrid);
+  const scaledConfidenceRect = scaleRectToGrid(sourceRect, roofGrids.coverageGrid, roofGrids.confidenceGrid);
+  const croppedBounds = boundsForGridRect(roofGrids.renderBounds, roofGrids.coverageGrid, sourceRect);
+  const croppedSolarGrid = cropGrid(roofGrids.solarGrid, scaledSolarRect);
+  const croppedObservedGrid = cropGrid(roofGrids.observedSolarGrid, scaledObservedRect);
+  const croppedCoverageGrid = cropGrid(roofGrids.coverageGrid, sourceRect);
+  const croppedConfidenceGrid = cropGrid(roofGrids.confidenceGrid, scaledConfidenceRect);
   const width = roofGrids.solarGrid.width;
   const height = roofGrids.solarGrid.height;
+
   return {
     solarGrid: smoothGrid(
-      resampleGridToBounds(roofGrids.solarGrid, roofGrids.renderBounds, shellBounds, width, height),
+      resampleGridToBounds(croppedSolarGrid, croppedBounds, shellBounds, width, height),
       1,
     ),
-    coverageGrid: resampleGridToBounds(roofGrids.coverageGrid, roofGrids.renderBounds, shellBounds, width, height),
-    confidenceGrid: resampleGridToBounds(roofGrids.confidenceGrid, roofGrids.renderBounds, shellBounds, width, height),
+    observedSolarGrid: resampleGridToBounds(
+      croppedObservedGrid,
+      croppedBounds,
+      shellBounds,
+      width,
+      height,
+    ),
+    coverageGrid: resampleGridToBounds(croppedCoverageGrid, croppedBounds, shellBounds, width, height),
+    confidenceGrid: resampleGridToBounds(croppedConfidenceGrid, croppedBounds, shellBounds, width, height),
     renderBounds: shellBounds,
   };
 }
@@ -1093,23 +1158,28 @@ function buildWallMeshes(
 
 function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
   const positions: number[] = [];
-  const uvs: number[] = [];
+  const progressValues: number[] = [];
   const seeds: number[] = [];
   const intensities: number[] = [];
   const coolness: number[] = [];
+  const sizes: number[] = [];
 
   const coolEdges = exteriorEdges
     .filter((edge) => edge.hotspots.length > 0 && edge.length >= 3)
     .sort((a, b) => b.hotspots.length * b.length - a.hotspots.length * a.length)
     .slice(0, 3);
-  const warmEdges = exteriorEdges
-    .filter((edge) => edge.hotspots.length === 0 && edge.length >= 8 && edge.emitterWeight >= 0.12)
-    .sort((a, b) => b.emitterWeight * b.length - a.emitterWeight * a.length)
-    .slice(0, 3);
+  const warmEdges = (
+    coolEdges.length > 0
+      ? coolEdges
+      : exteriorEdges
+          .filter((edge) => edge.length >= 8 && edge.emitterWeight >= 0.14)
+          .sort((a, b) => b.emitterWeight * b.length - a.emitterWeight * a.length)
+          .slice(0, 3)
+  );
 
   const streams = [
     ...warmEdges.flatMap((edge) => {
-      const emitters = edge.length > 26 ? [0.28, 0.72] : [0.5];
+      const emitters = edge.hotspots.length > 0 ? edge.hotspots.slice(0, 2) : edge.length > 22 ? [0.3, 0.7] : [0.5];
       return emitters.map((t, index) => ({ edge, t, index, cool: false }));
     }),
     ...(
@@ -1124,104 +1194,83 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
   ];
 
   streams.forEach(({ edge, t, index, cool }, streamIndex) => {
-    const direction = cool ? { x: -edge.normal.x, z: -edge.normal.z } : edge.normal;
-    const anchor = {
+    const baseAnchor = {
       x: edge.start.x + (edge.end.x - edge.start.x) * t,
       z: edge.start.z + (edge.end.z - edge.start.z) * t,
     };
-    const lateralBend = (index - 0.5) * (cool ? 0.65 : 1.4);
-    const start = {
-      x: anchor.x + edge.normal.x * (cool ? 2.2 : 1.2) + edge.tangent.x * lateralBend,
-      z: anchor.z + edge.normal.z * (cool ? 2.2 : 1.2) + edge.tangent.z * lateralBend,
-    };
-    const mid = {
-      x:
-        start.x +
-        direction.x * (cool ? 6.5 : 10.5 + edge.emitterWeight * 5.2) +
-        edge.tangent.x * (cool ? -0.4 : 2.4),
-      z:
-        start.z +
-        direction.z * (cool ? 6.5 : 10.5 + edge.emitterWeight * 5.2) +
-        edge.tangent.z * (cool ? -0.4 : 2.4),
-    };
-    const end = {
-      x:
-        start.x +
-        direction.x * (cool ? 13.5 : 22 + edge.emitterWeight * 8.5) +
-        edge.tangent.x * (cool ? -0.8 : 5.5),
-      z:
-        start.z +
-        direction.z * (cool ? 13.5 : 22 + edge.emitterWeight * 8.5) +
-        edge.tangent.z * (cool ? -0.8 : 5.5),
-    };
-    const widths = cool
-      ? [1.2, 0.95, 0.58]
-      : [2.2 + edge.emitterWeight * 1.2, 1.55 + edge.emitterWeight * 0.8, 0.72 + edge.emitterWeight * 0.35];
-    const sections = cool
-      ? [
-          { point: start, y: 1.6, progress: 0 },
-          { point: mid, y: 2.7 + edge.height * 0.03, progress: 0.56 },
-          { point: end, y: 4.1 + edge.height * 0.06, progress: 1 },
-        ]
-      : [
-          { point: start, y: 2.4 + edge.height * 0.18, progress: 0 },
-          { point: mid, y: 8 + edge.height * 0.32, progress: 0.58 },
-          { point: end, y: 14.5 + edge.height * 0.42, progress: 1 },
-        ];
-
-    for (let i = 0; i < sections.length - 1; i += 1) {
-      const current = sections[i];
-      const next = sections[i + 1];
-      const widthA = widths[i];
-      const widthB = widths[i + 1];
-      const leftA = {
-        x: current.point.x - edge.tangent.x * widthA,
-        z: current.point.z - edge.tangent.z * widthA,
+    const filamentCount = cool ? 2 : 2;
+    for (let filament = 0; filament < filamentCount; filament += 1) {
+      const spread = filament - (filamentCount - 1) * 0.5;
+      const seed = streamIndex * 0.43 + index * 0.37 + filament * 0.19;
+      const anchor = {
+        x: baseAnchor.x + edge.tangent.x * spread * (cool ? 0.95 : 1.2),
+        z: baseAnchor.z + edge.tangent.z * spread * (cool ? 0.95 : 1.2),
       };
-      const rightA = {
-        x: current.point.x + edge.tangent.x * widthA,
-        z: current.point.z + edge.tangent.z * widthA,
-      };
-      const leftB = {
-        x: next.point.x - edge.tangent.x * widthB,
-        z: next.point.z - edge.tangent.z * widthB,
-      };
-      const rightB = {
-        x: next.point.x + edge.tangent.x * widthB,
-        z: next.point.z + edge.tangent.z * widthB,
-      };
-
-      positions.push(
-        leftA.x, current.y, leftA.z,
-        rightA.x, current.y, rightA.z,
-        leftB.x, next.y, leftB.z,
-        leftB.x, next.y, leftB.z,
-        rightA.x, current.y, rightA.z,
-        rightB.x, next.y, rightB.z,
+      const wallBaseY = Math.min(Math.max(edge.height * 0.16, 1.8), 4.2);
+      const warmStart = new THREE.Vector3(
+        anchor.x + edge.normal.x * 0.45,
+        wallBaseY,
+        anchor.z + edge.normal.z * 0.45,
       );
-      uvs.push(
-        current.progress, 0,
-        current.progress, 1,
-        next.progress, 0,
-        next.progress, 0,
-        current.progress, 1,
-        next.progress, 1,
+      const warmCp1 = new THREE.Vector3(
+        warmStart.x + edge.normal.x * (4.2 + edge.emitterWeight * 2.2) + edge.tangent.x * spread * 1.4,
+        wallBaseY + 1.4,
+        warmStart.z + edge.normal.z * (4.2 + edge.emitterWeight * 2.2) + edge.tangent.z * spread * 1.4,
       );
-      const seed = streamIndex * 0.49 + index * 0.63 + i * 0.17;
-      for (let vertex = 0; vertex < 6; vertex += 1) {
+      const warmCp2 = new THREE.Vector3(
+        warmStart.x + edge.normal.x * (10.5 + edge.emitterWeight * 4.5) + edge.tangent.x * spread * 2.6,
+        wallBaseY + 5.5 + edge.emitterWeight * 2.2,
+        warmStart.z + edge.normal.z * (10.5 + edge.emitterWeight * 4.5) + edge.tangent.z * spread * 2.6,
+      );
+      const warmEnd = new THREE.Vector3(
+        warmStart.x + edge.normal.x * (17 + edge.emitterWeight * 7.5) + edge.tangent.x * spread * 4.2,
+        wallBaseY + 10 + edge.emitterWeight * 4.5,
+        warmStart.z + edge.normal.z * (17 + edge.emitterWeight * 7.5) + edge.tangent.z * spread * 4.2,
+      );
+      const coolStart = new THREE.Vector3(
+        anchor.x - edge.normal.x * 12.5 + edge.tangent.x * spread * 1.8,
+        wallBaseY + 1.2,
+        anchor.z - edge.normal.z * 12.5 + edge.tangent.z * spread * 1.8,
+      );
+      const coolCp1 = new THREE.Vector3(
+        anchor.x - edge.normal.x * 8 + edge.tangent.x * spread * 1.3,
+        wallBaseY + 2.6,
+        anchor.z - edge.normal.z * 8 + edge.tangent.z * spread * 1.3,
+      );
+      const coolCp2 = new THREE.Vector3(
+        anchor.x - edge.normal.x * 3.8 + edge.tangent.x * spread * 0.8,
+        wallBaseY + 1.4,
+        anchor.z - edge.normal.z * 3.8 + edge.tangent.z * spread * 0.8,
+      );
+      const coolEnd = new THREE.Vector3(
+        anchor.x - edge.normal.x * 0.15,
+        wallBaseY + 0.4,
+        anchor.z - edge.normal.z * 0.15,
+      );
+      const curve = cool
+        ? new THREE.CatmullRomCurve3([coolStart, coolCp1, coolCp2, coolEnd])
+        : new THREE.CatmullRomCurve3([warmStart, warmCp1, warmCp2, warmEnd]);
+      const pointCount = cool ? 22 : 26;
+      for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+        const progress = pointIndex / Math.max(pointCount - 1, 1);
+        const point = curve.getPoint(progress);
+        positions.push(point.x, point.y, point.z);
+        progressValues.push(progress);
         seeds.push(seed);
-        intensities.push(cool ? 0.72 : 0.9 + edge.emitterWeight * 0.75);
+        intensities.push(cool ? 0.46 : 0.58 + edge.emitterWeight * 0.34);
         coolness.push(cool ? 1 : 0);
+        sizes.push(cool ? 3.8 - progress * 1.2 : 4.2 - progress * 1.4);
       }
     }
   });
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute("aProgress", new THREE.Float32BufferAttribute(progressValues, 1));
   geometry.setAttribute("aSeed", new THREE.Float32BufferAttribute(seeds, 1));
   geometry.setAttribute("aIntensity", new THREE.Float32BufferAttribute(intensities, 1));
   geometry.setAttribute("aCool", new THREE.Float32BufferAttribute(coolness, 1));
+  geometry.setAttribute("aSize", new THREE.Float32BufferAttribute(sizes, 1));
 
   const uniforms = {
     uTime: { value: 0 },
@@ -1231,56 +1280,58 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
   const material = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    depthTest: false,
-    side: THREE.DoubleSide,
+    depthTest: true,
     blending: THREE.AdditiveBlending,
     uniforms,
     vertexShader: `
+      attribute float aProgress;
       attribute float aSeed;
       attribute float aIntensity;
       attribute float aCool;
-      varying vec2 vUv;
+      attribute float aSize;
+      varying float vProgress;
       varying float vSeed;
       varying float vIntensity;
       varying float vCool;
       void main() {
-        vUv = uv;
+        vProgress = aProgress;
         vSeed = aSeed;
         vIntensity = aIntensity;
         vCool = aCool;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        gl_PointSize = aSize * (165.0 / max(18.0, -mvPosition.z));
       }
     `,
     fragmentShader: `
       uniform float uTime;
       uniform float uVisible;
-      varying vec2 vUv;
+      varying float vProgress;
       varying float vSeed;
       varying float vIntensity;
       varying float vCool;
 
       void main() {
-        float speed = mix(0.22, 0.32, clamp(vIntensity, 0.0, 1.0));
-        float phase = fract(vUv.x * mix(1.5, 1.9, vCool) - uTime * speed + vSeed);
-        float ribbon = smoothstep(0.5, 0.16, abs(vUv.y - 0.5));
-        float fade = smoothstep(0.0, 0.06, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
-        float body = ribbon * (0.18 + vIntensity * 0.1);
-        float pulse = exp(-pow((phase - 0.3) * 7.5, 2.0));
-        float chevron = smoothstep(0.24, 0.04, abs(vUv.y - (0.5 + (phase - 0.3) * 0.26)));
-        float shimmer = sin(vSeed * 17.0 + uTime * 2.2 + vUv.x * 8.0) * 0.5 + 0.5;
-        vec3 warm = mix(vec3(1.0, 0.5, 0.12), vec3(1.0, 0.95, 0.82), 0.45 + shimmer * 0.18);
-        vec3 cool = mix(vec3(0.24, 0.68, 1.0), vec3(0.84, 0.98, 1.0), 0.42 + shimmer * 0.16);
+        vec2 centered = gl_PointCoord - 0.5;
+        float radial = 1.0 - smoothstep(0.14, 0.5, length(centered));
+        float speed = mix(0.16, 0.28, clamp(vIntensity, 0.0, 1.0));
+        float phase = fract(vProgress * mix(1.3, 1.75, vCool) - uTime * speed + vSeed);
+        float pulse = exp(-pow((phase - 0.2) * 9.5, 2.0));
+        float trail = smoothstep(0.0, 0.06, vProgress) * smoothstep(1.0, 0.7, vProgress);
+        float shimmer = sin(vSeed * 19.0 + uTime * 2.4 + vProgress * 10.0) * 0.5 + 0.5;
+        vec3 warm = mix(vec3(0.96, 0.54, 0.12), vec3(1.0, 0.78, 0.22), 0.32 + shimmer * 0.12);
+        vec3 cool = mix(vec3(0.0, 0.72, 0.92), vec3(0.18, 0.94, 1.0), 0.28 + shimmer * 0.12);
         vec3 color = mix(warm, cool, vCool);
-        color += mix(vec3(0.42, 0.16, 0.0), vec3(0.05, 0.34, 0.95), vCool) * pulse * 0.16;
-        float alpha = (body + pulse * chevron * 0.7 + pulse * ribbon * 0.2) * fade * (0.72 + vIntensity * 0.28) * uVisible;
+        color += mix(vec3(0.32, 0.1, 0.0), vec3(0.0, 0.26, 0.62), vCool) * pulse * 0.14;
+        float alpha = radial * trail * (0.08 + pulse * 0.48) * (0.56 + vIntensity * 0.24) * uVisible;
         gl_FragColor = vec4(color, alpha);
       }
     `,
   });
 
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.renderOrder = 4;
-  return { points: mesh, uniforms };
+  const points = new THREE.Points(geometry, material);
+  points.renderOrder = 4;
+  return { points, uniforms };
 }
 
 function getMonthlyGrid(solar: SolarVisualization, month: number) {
@@ -1288,6 +1339,13 @@ function getMonthlyGrid(solar: SolarVisualization, month: number) {
     return solar.monthlyFluxGrids.find((grid) => grid.month === month) ?? solar.annualFluxGrid;
   }
   return solar.annualFluxGrid;
+}
+
+function getObservedMonthlyGrid(solar: SolarVisualization, month: number) {
+  if (month > 0) {
+    return solar.observedMonthlyFluxGrids.find((grid) => grid.month === month) ?? solar.observedSolarGrid;
+  }
+  return solar.observedSolarGrid;
 }
 
 function createHoverDetail(
@@ -1383,6 +1441,7 @@ export default function MapboxThreeScene({
       });
     Object.values(layerState.wallThermalTextures).forEach((texture) => texture?.dispose());
     layerState.roofSolarTexture?.dispose();
+    layerState.roofObservedTexture?.dispose();
     layerState.roofCoverageTexture?.dispose();
     layerState.roofConfidenceTexture?.dispose();
     layerState.roofThermalTexture?.dispose();
@@ -1423,6 +1482,7 @@ export default function MapboxThreeScene({
     layerState.displayRoofGrids = displayRoofGrids;
 
     const roofSolarTexture = createTexture(displayRoofGrids.solarGrid, true);
+    const roofObservedTexture = createTexture(displayRoofGrids.observedSolarGrid, true);
     const roofCoverageTexture = createTexture(displayRoofGrids.coverageGrid, false);
     const roofConfidenceTexture = createTexture(displayRoofGrids.confidenceGrid, false);
     const roofThermalTexture = createThermalGridTexture(
@@ -1430,6 +1490,7 @@ export default function MapboxThreeScene({
     );
 
     layerState.roofSolarTexture = roofSolarTexture;
+    layerState.roofObservedTexture = roofObservedTexture;
     layerState.roofCoverageTexture = roofCoverageTexture;
     layerState.roofConfidenceTexture = roofConfidenceTexture;
     layerState.roofThermalTexture = roofThermalTexture;
@@ -1440,6 +1501,7 @@ export default function MapboxThreeScene({
     // --- Roof overlay (solar + thermal heatmap) ---
     const { material: roofMaterial, uniforms: roofUniforms } = createRoofShaderMaterial(
       roofSolarTexture,
+      roofObservedTexture,
       roofThermalTexture,
       roofCoverageTexture,
       roofConfidenceTexture,
@@ -1551,7 +1613,7 @@ export default function MapboxThreeScene({
 
         layerState.wallUniforms.forEach((uniforms) => {
           uniforms.uTime.value = performance.now() * 0.0006;
-          uniforms.uVisible.value = overlay === "solar" ? 0.08 : 0.96;
+          uniforms.uVisible.value = overlay === "solar" ? 0.04 : 0.62;
         });
 
         if (hoverDirtyRef.current && layerState.raycaster) {
