@@ -138,35 +138,67 @@ export default function Audit3DView() {
   }
 
   return (
-    <div className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(6,182,212,0.18),_transparent_28%),radial-gradient(circle_at_bottom_right,_rgba(0,229,134,0.16),_transparent_24%),linear-gradient(180deg,#07101d_0%,#091321_100%)] px-6 py-8">
+    <div className="min-h-screen px-6 pb-20 pt-32">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <Link href="/results" className="mb-4 inline-flex items-center gap-2 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
+            <Link
+              href="/results"
+              className="mb-4 inline-flex items-center gap-2 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+            >
               <ArrowLeft className="h-4 w-4" /> Back to Results
             </Link>
-            <h1 className="text-3xl font-heading font-bold text-white md:text-5xl">
-              3D Energy Envelope for {buildingInfo.address}
+            <span className="eyebrow">Step 03 · Visualization</span>
+            <h1 className="section-title mt-4 text-navy">
+              3D energy map.
+              <span className="block text-mid-navy">Rendered for the real site.</span>
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-[var(--text-secondary)] md:text-base">
-              Real roof solar potential from Google Solar, paired with a model-driven thermal envelope and particle flow built from the audit&apos;s weather and PRISM signals.
+            <p className="mt-5 max-w-3xl text-[1rem] leading-8 text-[var(--text-secondary)]">
+              Solar production, thermal loss, and retrofit scenarios are layered onto the building shell so the audit reads like a physical object instead of a spreadsheet.
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <div className="rounded-full border border-[rgba(255,196,77,0.35)] bg-[rgba(255,196,77,0.12)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent-amber)]">
-              Google Solar imagery {formatDate(data?.solar.imageryDate ?? null)}
-            </div>
-            <div className="rounded-full border border-[rgba(6,182,212,0.35)] bg-[rgba(6,182,212,0.12)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent-cyan)]">
-              Model-driven thermal flow
-            </div>
+          <div className="flex flex-wrap gap-3 lg:max-w-[28rem] lg:justify-end">
+            <span className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-amber-dim)] px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-[var(--accent-amber)]">
+              <SunMedium className="h-3.5 w-3.5" /> Google Solar imagery {formatDate(data?.solar.imageryDate ?? null)}
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-blue-dim)] px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-mid-navy">
+              <Thermometer className="h-3.5 w-3.5" /> Model-driven thermal flow
+            </span>
           </div>
         </div>
 
+        <div className="grid gap-4 md:grid-cols-4">
+          <MetricCard label="Address" value={buildingInfo.address.split(",")[0] || buildingInfo.address} detail="Mapped building shell" />
+          <MetricCard
+            label="Scenario"
+            value={scenarioDisplayLabel(scenario)}
+            detail={overlay === "both" ? "Solar + thermal" : overlay === "solar" ? "Solar only" : "Thermal only"}
+          />
+          <MetricCard label="Peak envelope flux" value={`${thermalPeak.toFixed(1)} W/m²`} detail="Modeled heat-loss intensity" />
+          <MetricCard
+            label="Solar opportunity"
+            value={`$${Math.round(roofSummary?.estimatedAnnualSavingsUsd ?? 0).toLocaleString()}/yr`}
+            detail={`${roofSummary?.maxArrayPanelsCount ?? 0} roof panels`}
+          />
+        </div>
+
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_360px]">
-          <GlassCard className="min-h-[720px] overflow-hidden border-[rgba(148,163,184,0.12)] bg-[rgba(6,12,22,0.72)] p-0">
+          <GlassCard className="overflow-hidden rounded-[2rem] p-0">
+            <div className="flex items-center justify-between border-b border-white/55 px-5 py-4">
+              <div>
+                <div className="font-heading text-[1.2rem] font-bold tracking-[-0.04em] text-navy">Interactive scene</div>
+                <div className="mt-1 font-mono text-[0.66rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  Orbit, zoom, and inspect roof and facade surfaces
+                </div>
+              </div>
+              <div className="hidden rounded-full bg-white/42 px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-[var(--text-muted)] sm:block">
+                Live 3D canvas
+              </div>
+            </div>
+
             {isLoading || !data ? (
-              <div className="flex h-[720px] items-center justify-center text-[var(--text-secondary)]">
+              <div className="flex h-[720px] items-center justify-center px-6 text-center text-[var(--text-secondary)]">
                 {error ? (
                   <span>{error}</span>
                 ) : (
@@ -176,48 +208,54 @@ export default function Audit3DView() {
                 )}
               </div>
             ) : (
-              <MapboxThreeScene
-                data={data}
-                scenario={scenario}
-                overlay={overlay}
-                month={month}
-                particlesEnabled={particlesEnabled}
-                onHoverChange={setHovered}
-              />
+              <div className="h-[720px] overflow-hidden">
+                <MapboxThreeScene
+                  data={data}
+                  scenario={scenario}
+                  overlay={overlay}
+                  month={month}
+                  particlesEnabled={particlesEnabled}
+                  onHoverChange={setHovered}
+                />
+              </div>
             )}
           </GlassCard>
 
           <div className="flex flex-col gap-6">
-            <GlassCard className="p-5">
+            <GlassCard className="rounded-[2rem] p-5">
               <div className="mb-4 flex items-center gap-3">
-                <Orbit className="h-5 w-5 text-[var(--accent-cyan)]" />
-                <h2 className="font-heading text-lg font-semibold">Scene Controls</h2>
+                <Orbit className="h-5 w-5 text-mid-navy" />
+                <h2 className="font-heading text-lg font-bold tracking-[-0.03em] text-navy">Scene Controls</h2>
               </div>
 
               <ControlGroup label="Scenario">
-                {SCENARIOS.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setScenario(item.id)}
-                    className={pillClassName(scenario === item.id)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                <div className="flex flex-wrap gap-2">
+                  {SCENARIOS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setScenario(item.id)}
+                      className={pillClassName(scenario === item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </ControlGroup>
 
               <ControlGroup label="Overlay">
-                {OVERLAYS.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setOverlay(item.id)}
-                    className={pillClassName(overlay === item.id)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                <div className="flex flex-wrap gap-2">
+                  {OVERLAYS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setOverlay(item.id)}
+                      className={pillClassName(overlay === item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </ControlGroup>
 
               <ControlGroup label="Season / Month">
@@ -235,10 +273,10 @@ export default function Audit3DView() {
                 </div>
               </ControlGroup>
 
-              <div className="mt-5 flex items-center justify-between rounded-2xl border border-[var(--border-subtle)] bg-[rgba(8,15,29,0.78)] px-4 py-3">
+              <div className="mt-5 flex items-center justify-between rounded-[1.4rem] border border-white/58 bg-white/34 px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-white">Particle Flow</p>
-                  <p className="text-xs text-[var(--text-muted)]">Show GPU heat-loss streamlines</p>
+                  <p className="text-sm font-semibold text-navy">Particle flow</p>
+                  <p className="text-xs text-[var(--text-muted)]">Show animated heat-loss streamlines</p>
                 </div>
                 <button
                   type="button"
@@ -250,26 +288,26 @@ export default function Audit3DView() {
               </div>
             </GlassCard>
 
-            <GlassCard className="p-5">
+            <GlassCard className="rounded-[2rem] p-5">
               <div className="mb-4 flex items-center gap-3">
                 <SunMedium className="h-5 w-5 text-[var(--accent-amber)]" />
-                <h2 className="font-heading text-lg font-semibold">Solar Insight</h2>
+                <h2 className="font-heading text-lg font-bold tracking-[-0.03em] text-navy">Solar Insight</h2>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <StatCard label="Roof Area" value={`${roofSummary?.areaMeters2.toFixed(0) ?? "0"} m²`} />
                 <StatCard label="Panels" value={`${roofSummary?.maxArrayPanelsCount ?? 0}`} />
-                <StatCard label="Annual Output" value={`${roofSummary?.estimatedAnnualKwh.toLocaleString() ?? "0"} kWh`} />
-                <StatCard label="Annual Savings" value={`$${roofSummary?.estimatedAnnualSavingsUsd.toLocaleString() ?? "0"}`} />
+                <StatCard label="Annual Output" value={`${(roofSummary?.estimatedAnnualKwh ?? 0).toLocaleString()} kWh`} />
+                <StatCard label="Annual Savings" value={`$${(roofSummary?.estimatedAnnualSavingsUsd ?? 0).toLocaleString()}`} />
               </div>
               <p className="mt-4 text-xs leading-relaxed text-[var(--text-muted)]">
                 Source: {data?.solar.source === "google_solar" ? "Google Solar roof flux rasters" : "Modeled fallback roof suitability"}.
               </p>
             </GlassCard>
 
-            <GlassCard className="p-5">
+            <GlassCard className="rounded-[2rem] p-5">
               <div className="mb-4 flex items-center gap-3">
                 <Thermometer className="h-5 w-5 text-[var(--accent-red)]" />
-                <h2 className="font-heading text-lg font-semibold">Thermal Envelope</h2>
+                <h2 className="font-heading text-lg font-bold tracking-[-0.03em] text-navy">Thermal Envelope</h2>
               </div>
               <div className="space-y-3">
                 <StatRow label="Scenario" value={scenarioDisplayLabel(scenario)} />
@@ -277,35 +315,35 @@ export default function Audit3DView() {
                 <StatRow label="Envelope Band" value={data?.thermal.assumptions.envelopeVintageBand.replaceAll("_", " ") ?? "n/a"} />
                 <StatRow label="Heating / Cooling" value={`${analysisResults.heatingPercent}% / ${analysisResults.coolingPercent}%`} />
               </div>
-              <div className="mt-4 rounded-2xl border border-[rgba(239,68,68,0.18)] bg-[rgba(239,68,68,0.07)] px-4 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-                This layer is a stylized interpretation of modeled envelope loss using PRISM, weather normalization, and building metadata. It is not CFD.
+              <div className="mt-4 rounded-[1.4rem] border border-[rgba(160,40,40,0.18)] bg-[rgba(160,40,40,0.07)] px-4 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+                This thermal layer is a stylized interpretation of modeled envelope loss using PRISM, weather normalization, and building metadata. It is not CFD.
               </div>
             </GlassCard>
 
-            <GlassCard className="p-5">
+            <GlassCard className="rounded-[2rem] p-5">
               <div className="mb-4 flex items-center gap-3">
-                <Waves className="h-5 w-5 text-[var(--accent-cyan)]" />
-                <h2 className="font-heading text-lg font-semibold">Hover Readout</h2>
+                <Waves className="h-5 w-5 text-mid-navy" />
+                <h2 className="font-heading text-lg font-bold tracking-[-0.03em] text-navy">Hover Readout</h2>
               </div>
               {hovered ? (
-                <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(8,15,29,0.78)] p-4">
-                  <p className="text-sm font-semibold text-white">{hovered.title}</p>
-                  <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{hovered.detail}</p>
+                <div className="rounded-[1.4rem] border border-white/58 bg-white/36 p-4">
+                  <p className="text-sm font-semibold text-navy">{hovered.title}</p>
+                  <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">{hovered.detail}</p>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--text-muted)]">
-                  Hover the roof or facades to inspect the Google Solar roof grid or modeled heat-loss patches.
+                <p className="text-sm leading-7 text-[var(--text-secondary)]">
+                  Hover the roof or facade surfaces to inspect Google Solar roof tiles or modeled heat-loss patches.
                 </p>
               )}
             </GlassCard>
 
-            <GlassCard className="p-5">
+            <GlassCard className="rounded-[2rem] p-5">
               <div className="mb-4 flex items-center gap-3">
-                <Building2 className="h-5 w-5 text-[var(--accent-green)]" />
-                <h2 className="font-heading text-lg font-semibold">Why This Matters</h2>
+                <Building2 className="h-5 w-5 text-success" />
+                <h2 className="font-heading text-lg font-bold tracking-[-0.03em] text-navy">Why This Matters</h2>
               </div>
-              <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-                The 3D view turns abstract audit signals into a decision surface: roof production potential from real Google Solar flux data, facade loss patterns from the modeled envelope, and particle motion that makes retrofit impact legible.
+              <p className="text-sm leading-7 text-[var(--text-secondary)]">
+                The 3D view turns abstract audit signals into a decision surface: roof production potential from Google Solar data, facade loss patterns from the modeled envelope, and motion that makes retrofit impact legible for clients.
               </p>
             </GlassCard>
           </div>
@@ -326,18 +364,18 @@ function ControlGroup({ label, children }: { label: string; children: React.Reac
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(8,15,29,0.78)] p-4">
-      <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
+    <div className="rounded-[1.25rem] border border-white/58 bg-white/34 p-4">
+      <p className="font-mono text-[0.64rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">{label}</p>
+      <p className="mt-2 font-heading text-[1.05rem] font-bold tracking-[-0.03em] text-navy">{value}</p>
     </div>
   );
 }
 
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between border-b border-[rgba(148,163,184,0.08)] pb-2 text-sm last:border-b-0">
+    <div className="flex items-center justify-between border-b border-white/46 pb-2 text-sm last:border-b-0">
       <span className="text-[var(--text-muted)]">{label}</span>
-      <span className="font-medium text-white">{value}</span>
+      <span className="font-medium text-navy">{value}</span>
     </div>
   );
 }
@@ -346,8 +384,8 @@ function pillClassName(active: boolean) {
   return [
     "rounded-full border px-4 py-2 text-sm font-medium transition-all",
     active
-      ? "border-[var(--accent-green)] bg-[rgba(0,229,134,0.12)] text-[var(--accent-green)]"
-      : "border-[var(--border-subtle)] bg-[rgba(8,15,29,0.78)] text-[var(--text-secondary)] hover:border-[rgba(6,182,212,0.28)] hover:text-white",
+      ? "border-[var(--accent-blue)] bg-[var(--accent-blue-dim)] text-mid-navy"
+      : "border-white/58 bg-white/30 text-[var(--text-secondary)] hover:border-white/80 hover:bg-white/42 hover:text-navy",
   ].join(" ");
 }
 
@@ -355,7 +393,17 @@ function tinyPillClassName(active: boolean) {
   return [
     "rounded-full border px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.08em] transition-all",
     active
-      ? "border-[var(--accent-cyan)] bg-[rgba(6,182,212,0.12)] text-[var(--accent-cyan)]"
-      : "border-[var(--border-subtle)] bg-[rgba(8,15,29,0.78)] text-[var(--text-muted)] hover:border-[rgba(0,229,134,0.28)] hover:text-white",
+      ? "border-[var(--accent-blue)] bg-[var(--accent-blue-dim)] text-mid-navy"
+      : "border-white/58 bg-white/30 text-[var(--text-muted)] hover:border-white/80 hover:bg-white/42 hover:text-navy",
   ].join(" ");
+}
+
+function MetricCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <GlassCard className="rounded-[1.6rem] px-5 py-5">
+      <div className="font-mono text-[0.64rem] uppercase tracking-[0.16em] text-[var(--text-muted)]">{label}</div>
+      <div className="mt-3 font-heading text-[1.45rem] font-bold tracking-[-0.05em] text-navy">{value}</div>
+      <div className="mt-2 text-sm text-[var(--text-secondary)]">{detail}</div>
+    </GlassCard>
+  );
 }

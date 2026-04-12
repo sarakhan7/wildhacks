@@ -48,7 +48,7 @@ type LocalPoint = { x: number; z: number };
 type LayerState = {
   map: mapboxgl.Map | null;
   scene: THREE.Scene | null;
-  camera: THREE.Camera | null;
+  camera: THREE.PerspectiveCamera | null;
   renderer: THREE.WebGLRenderer | null;
   raycaster: THREE.Raycaster | null;
   roofMesh: THREE.Mesh | null;
@@ -183,8 +183,26 @@ function distanceToCenter(ring: [number, number][], lng: number, lat: number) {
   return Math.hypot(centroid.lng - lng, centroid.lat - lat);
 }
 
-function resolveFootprint(map: mapboxgl.Map, data: VisualizationSceneResponse) {
+function resolveFootprint(map: mapboxgl.Map, data: VisualizationSceneResponse): LocalPoint[] | null {
   try {
+    // Strategy 1: queryRenderedFeatures at the building pin
+    const point = map.project([data.building.lng, data.building.lat]);
+    const rendered = map.queryRenderedFeatures(
+      [[point.x - 40, point.y - 40], [point.x + 40, point.y + 40]],
+      { layers: ["visualization-context-buildings"] },
+    );
+    if (rendered.length > 0) {
+      const best = rendered
+        .map((f) => ({ ring: extractFeatureRing(f), feature: f }))
+        .filter((e): e is { ring: [number, number][]; feature: mapboxgl.MapboxGeoJSONFeature } => Boolean(e.ring) && e.ring.length >= 3)
+        .sort((a, b) => distanceToCenter(a.ring, data.building.lng, data.building.lat) - distanceToCenter(b.ring, data.building.lng, data.building.lat))[0];
+      if (best) {
+        const fp = sanitizeFootprint(featureCoordinatesToLocal(best.ring, data.building.lng, data.building.lat));
+        if (fp.length >= 3) return fp;
+      }
+    }
+
+    // Strategy 2: querySourceFeatures from composite source
     const sourceFeatures = map.querySourceFeatures("composite", { sourceLayer: "building" });
     const candidates = sourceFeatures
       .filter((feature) => feature.properties?.extrude === "true" || feature.properties?.extrude === true)
@@ -192,23 +210,18 @@ function resolveFootprint(map: mapboxgl.Map, data: VisualizationSceneResponse) {
       .filter((entry): entry is { ring: [number, number][]; feature: mapboxgl.MapboxGeoJSONFeature } => Boolean(entry.ring))
       .filter((entry) => entry.ring.length >= 3);
 
-    if (candidates.length === 0) {
-      return getRectangleFootprint(data.building.squareFeet, data.building.floors);
+    if (candidates.length > 0) {
+      const nearest = candidates.sort(
+        (a, b) => distanceToCenter(a.ring, data.building.lng, data.building.lat) - distanceToCenter(b.ring, data.building.lng, data.building.lat),
+      )[0];
+      const footprint = sanitizeFootprint(featureCoordinatesToLocal(nearest.ring, data.building.lng, data.building.lat));
+      if (footprint.length >= 3) return footprint;
     }
 
-    const nearest = candidates
-      .sort(
-        (a, b) =>
-          distanceToCenter(a.ring, data.building.lng, data.building.lat) -
-          distanceToCenter(b.ring, data.building.lng, data.building.lat),
-      )[0];
-
-    const footprint = sanitizeFootprint(
-      featureCoordinatesToLocal(nearest.ring, data.building.lng, data.building.lat),
-    );
-    return footprint.length >= 3 ? footprint : getRectangleFootprint(data.building.squareFeet, data.building.floors);
+    // No building data available yet — signal caller to retry
+    return null;
   } catch {
-    return getRectangleFootprint(data.building.squareFeet, data.building.floors);
+    return null;
   }
 }
 
@@ -362,18 +375,17 @@ function createParticleSystem(footprint: LocalPoint[], height: number, thermalSu
       for (let col = 0; col < roof.patchGrid.cols; col += 1) {
         const index = row * roof.patchGrid.cols + col;
         const flux = roof.patchValues[index];
-        if (flux <= roof.baseFluxWm2 * 0.72) {
-          continue;
-        }
+        if (flux <= roof.baseFluxWm2 * 0.2) continue;
         const u = (col + 0.5) / roof.patchGrid.cols;
         const v = (row + 0.5) / roof.patchGrid.rows;
         const x = THREE.MathUtils.lerp(bounds.minX, bounds.maxX, u);
         const z = THREE.MathUtils.lerp(bounds.minZ, bounds.maxZ, v);
-        basePositions.push(x, height + 0.15, z);
-        directions.push((u - 0.5) * 0.08, 1, (v - 0.5) * 0.08);
-        speeds.push(0.08 + flux / 110);
-        offsets.push(((row + 1) * (col + 3)) % 19 / 19);
-        intensities.push(Math.min(1, flux / 42));
+        // Emit upward with slight outward drift
+        basePositions.push(x, height + 0.2, z);
+        directions.push((u - 0.5) * 0.3, 1.0, (v - 0.5) * 0.3);
+        speeds.push(0.12 + flux / 80);
+        offsets.push(((row + 1) * (col + 3)) % 37 / 37);
+        intensities.push(Math.min(1, flux / 35));
         zeros.push(0, 0, 0);
       }
     }
@@ -382,22 +394,17 @@ function createParticleSystem(footprint: LocalPoint[], height: number, thermalSu
   thermalSurfaces
     .filter((surface) => surface.kind !== "roof" && surface.baseFluxWm2 > 0)
     .forEach((surface) => {
-      const direction =
-        surface.kind === "north_wall"
-          ? new THREE.Vector3(0, 0.15, -1)
-          : surface.kind === "south_wall"
-            ? new THREE.Vector3(0, 0.15, 1)
-            : surface.kind === "east_wall"
-              ? new THREE.Vector3(1, 0.15, 0)
-              : new THREE.Vector3(-1, 0.15, 0);
+      const dir =
+        surface.kind === "north_wall" ? new THREE.Vector3(0, 0.25, -1)
+        : surface.kind === "south_wall" ? new THREE.Vector3(0, 0.25, 1)
+        : surface.kind === "east_wall" ? new THREE.Vector3(1, 0.25, 0)
+        : new THREE.Vector3(-1, 0.25, 0);
 
       for (let row = 0; row < surface.patchGrid.rows; row += 1) {
         for (let col = 0; col < surface.patchGrid.cols; col += 1) {
           const index = row * surface.patchGrid.cols + col;
           const flux = surface.patchValues[index];
-          if (flux <= surface.baseFluxWm2 * 0.7) {
-            continue;
-          }
+          if (flux <= surface.baseFluxWm2 * 0.15) continue;
           const u = (col + 0.5) / surface.patchGrid.cols;
           const v = (row + 0.5) / surface.patchGrid.rows;
           const y = THREE.MathUtils.lerp(0.5, height - 0.35, 1 - v);
@@ -411,10 +418,10 @@ function createParticleSystem(footprint: LocalPoint[], height: number, thermalSu
             z = THREE.MathUtils.lerp(bounds.minZ, bounds.maxZ, u);
           }
           basePositions.push(x, y, z);
-          directions.push(direction.x, direction.y, direction.z);
-          speeds.push(0.05 + flux / 130);
-          offsets.push(((row + 2) * (col + 5)) % 23 / 23);
-          intensities.push(Math.min(1, flux / 38));
+          directions.push(dir.x, dir.y, dir.z);
+          speeds.push(0.08 + flux / 100);
+          offsets.push(((row + 2) * (col + 5)) % 41 / 41);
+          intensities.push(Math.min(1, flux / 32));
           zeros.push(0, 0, 0);
         }
       }
@@ -447,22 +454,32 @@ function createParticleSystem(footprint: LocalPoint[], height: number, thermalSu
       uniform float uTime;
       uniform float uVisible;
       varying float vIntensity;
+      varying float vCycle;
       void main() {
         float cycle = fract(uTime * speed + offset);
-        vec3 animated = basePosition + direction * cycle * (1.4 + intensity * 3.2);
+        float travelDist = 2.5 + intensity * 6.0;
+        vec3 animated = basePosition + direction * cycle * travelDist;
         vec4 mvPosition = modelViewMatrix * vec4(animated, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = (5.0 + intensity * 12.0) * uVisible;
+        gl_PointSize = (12.0 + intensity * 28.0) * uVisible * (0.6 + 0.4 * sin(cycle * 3.14159));
         vIntensity = intensity;
+        vCycle = cycle;
       }
     `,
     fragmentShader: `
       varying float vIntensity;
+      varying float vCycle;
       void main() {
         float dist = distance(gl_PointCoord, vec2(0.5));
         if (dist > 0.5) discard;
-        float alpha = smoothstep(0.5, 0.0, dist) * (0.26 + vIntensity * 0.7);
-        vec3 color = mix(vec3(0.99, 0.58, 0.2), vec3(1.0, 0.2, 0.04), vIntensity);
+        float fadeIn = smoothstep(0.0, 0.15, vCycle);
+        float fadeOut = smoothstep(1.0, 0.6, vCycle);
+        float lifeFade = fadeIn * fadeOut;
+        float radial = smoothstep(0.5, 0.05, dist);
+        float alpha = radial * lifeFade * (0.6 + vIntensity * 0.4);
+        vec3 warm = vec3(1.0, 0.55, 0.15);
+        vec3 hot = vec3(1.0, 0.15, 0.0);
+        vec3 color = mix(warm, hot, vIntensity);
         gl_FragColor = vec4(color, alpha);
       }
     `,
@@ -486,9 +503,28 @@ function buildRoofGeometry(footprint: LocalPoint[], height: number) {
   shape.closePath();
   const geometry = new THREE.ShapeGeometry(shape, 12);
   geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, height, 0);
+  geometry.translate(0, height + 0.1, 0);
   geometry.computeVertexNormals();
   geometry.computeBoundsTree();
+  return geometry;
+}
+
+function buildBuildingBody(footprint: LocalPoint[], height: number) {
+  const shape = new THREE.Shape();
+  footprint.forEach((point, index) => {
+    if (index === 0) {
+      shape.moveTo(point.x, point.z);
+    } else {
+      shape.lineTo(point.x, point.z);
+    }
+  });
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: height,
+    bevelEnabled: false,
+  });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -501,14 +537,24 @@ function createWallMesh(
 ) {
   const length = Math.hypot(end.x - start.x, end.z - start.z);
   const geometry = new THREE.PlaneGeometry(length, height, 15, 7);
-  const midpoint = new THREE.Vector3((start.x + end.x) / 2, height / 2, (start.z + end.z) / 2);
-  const angle = Math.atan2(end.z - start.z, end.x - start.x);
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const angle = Math.atan2(dz, dx);
+  const len = Math.hypot(dx, dz);
+  // Offset wall 0.2m outward to prevent z-fighting with building body
+  const normalX = len > 0 ? dz / len : 0;
+  const normalZ = len > 0 ? -dx / len : 0;
+  const midpoint = new THREE.Vector3(
+    (start.x + end.x) / 2 + normalX * 0.2,
+    height / 2,
+    (start.z + end.z) / 2 + normalZ * 0.2,
+  );
   geometry.computeBoundsTree();
 
   const { material, uniforms } = createWallShaderMaterial(texture);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.copy(midpoint);
-  mesh.rotation.y = -angle + Math.PI / 2;
+  mesh.rotation.y = -angle;
   mesh.userData.kind = kind;
   return { mesh, uniforms };
 }
@@ -616,7 +662,20 @@ export default function MapboxThreeScene({
     layerState.roofMaskTexture?.dispose();
     layerState.roofThermalTexture?.dispose();
 
-    const footprint = resolveFootprint(layerState.map, data);
+    const footprintResult = resolveFootprint(layerState.map, data);
+    if (!footprintResult) {
+      // Building tiles not loaded yet — schedule a retry when map becomes idle
+      const retryOnIdle = () => {
+        layerState.map?.off("idle", retryOnIdle);
+        rebuildScene();
+      };
+      layerState.map.on("idle", retryOnIdle);
+      // Use a temporary rectangle fallback so something renders immediately
+      const tempFootprint = getRectangleFootprint(data.building.squareFeet, data.building.floors);
+      layerState.footprintPoints = tempFootprint;
+      return;
+    }
+    const footprint = footprintResult;
     const height = data.building.inferredHeightMeters;
     layerState.footprintPoints = footprint;
 
@@ -630,6 +689,21 @@ export default function MapboxThreeScene({
     layerState.roofMaskTexture = roofMaskTexture;
     layerState.roofThermalTexture = roofThermalTexture;
 
+    // --- Building body (solid 3D prism) ---
+    const bodyGeometry = buildBuildingBody(footprint, height);
+    const bodyMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x4a7c9b,
+      metalness: 0.15,
+      roughness: 0.65,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+    });
+    const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    bodyMesh.userData.visualization = true;
+    layerState.scene.add(bodyMesh);
+
+    // --- Roof overlay (solar + thermal heatmap) ---
     const roofGeometry = buildRoofGeometry(footprint, height);
     const { material: roofMaterial, uniforms: roofUniforms } = createRoofShaderMaterial(
       roofSolarTexture,
@@ -643,18 +717,17 @@ export default function MapboxThreeScene({
     layerState.roofUniforms = roofUniforms;
     layerState.scene.add(roofMesh);
 
+    // --- Thermal wall overlays (offset outward from body) ---
     const wallMeshes: THREE.Mesh[] = [];
     const wallUniforms: Array<Record<string, THREE.IUniform<unknown>>> = [];
     const wallThermalTextures: Partial<Record<string, THREE.DataTexture>> = {};
     const kinds = ["north_wall", "east_wall", "south_wall", "west_wall"] as const;
-    for (let i = 0; i < footprint.length; i += 1) {
+    for (let i = 0; i < Math.min(footprint.length, 4); i += 1) {
       const start = footprint[i];
       const end = footprint[(i + 1) % footprint.length];
       const kind = kinds[i % kinds.length];
       const surface = thermalSurfaces.find((entry) => entry.kind === kind);
-      if (!surface) {
-        continue;
-      }
+      if (!surface) continue;
       const thermalTexture = createThermalGridTexture(surface);
       wallThermalTextures[kind] = thermalTexture;
       const { mesh, uniforms } = createWallMesh(kind, start, end, height, thermalTexture);
@@ -667,12 +740,13 @@ export default function MapboxThreeScene({
     layerState.wallUniforms = wallUniforms;
     layerState.wallThermalTextures = wallThermalTextures;
 
+    // --- Edge wireframe ---
     const edgeGroup = new THREE.Group();
     [roofMesh, ...wallMeshes].forEach((mesh) => {
       const edges = new THREE.EdgesGeometry(mesh.geometry);
       const lines = new THREE.LineSegments(
         edges,
-        new THREE.LineBasicMaterial({ color: 0x78ecff, opacity: 0.22, transparent: true }),
+        new THREE.LineBasicMaterial({ color: 0x1a7fa8, opacity: 0.35, transparent: true }),
       );
       lines.position.copy(mesh.position);
       lines.rotation.copy(mesh.rotation);
@@ -682,6 +756,7 @@ export default function MapboxThreeScene({
     edgeGroup.userData.visualization = true;
     layerState.scene.add(edgeGroup);
 
+    // --- Particle system (heat-flow streamlines) ---
     const { points, uniforms: particleUniforms } = createParticleSystem(footprint, height, thermalSurfaces);
     points.userData.visualization = true;
     layerState.particleSystem = points;
@@ -705,8 +780,7 @@ export default function MapboxThreeScene({
         const layerState = layerStateRef.current;
         layerState.map = activeMap;
         layerState.scene = new THREE.Scene();
-        layerState.scene.fog = new THREE.FogExp2(0x08111f, 0.018);
-        layerState.camera = new THREE.Camera();
+        layerState.camera = new THREE.PerspectiveCamera();
         layerState.renderer = new THREE.WebGLRenderer({
           canvas: activeMap.getCanvas(),
           context: gl,
@@ -723,7 +797,9 @@ export default function MapboxThreeScene({
         directional.position.set(90, 140, 60);
         layerState.scene.add(ambient, directional);
 
-        rebuildScene();
+        // Defer initial build to allow tiles to load;
+        // will also rebuild via useEffect / idle
+        activeMap.once("idle", () => rebuildScene());
       },
       render(_gl, matrix) {
         const layerState = layerStateRef.current;
@@ -810,7 +886,7 @@ export default function MapboxThreeScene({
           pitch: 66,
           bearing: -26,
         }}
-        mapStyle="mapbox://styles/mapbox/satellite-v9"
+        mapStyle="mapbox://styles/mapbox/light-v11"
         onMouseMove={(event) => {
           const map = mapRef.current?.getMap();
           if (!map) {
@@ -836,16 +912,22 @@ export default function MapboxThreeScene({
           filter={["==", ["get", "extrude"], "true"]}
           type="fill-extrusion"
           paint={{
-            "fill-extrusion-color": "#0ea5e9",
+            "fill-extrusion-color": [
+              "interpolate", ["linear"], ["get", "height"],
+              0, "#d4dce6",
+              15, "#b0c4d8",
+              40, "#8aaabe",
+              80, "#6690a8",
+            ],
             "fill-extrusion-height": ["coalesce", ["to-number", ["get", "height"]], 0],
             "fill-extrusion-base": ["coalesce", ["to-number", ["get", "min_height"]], 0],
-            "fill-extrusion-opacity": 0.12,
+            "fill-extrusion-opacity": 0.7,
           }}
         />
       </Map>
 
       <div className="pointer-events-none absolute inset-0 rounded-[16px] border border-[rgba(255,255,255,0.08)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" />
-      <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-[rgba(8,145,178,0.45)] bg-[rgba(8,145,178,0.18)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100">
+      <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-[rgba(8,145,178,0.55)] bg-[rgba(8,145,178,0.85)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-md">
         {overlay === "both" ? "Solar + Thermal" : overlay === "solar" ? "Solar Roof Flux" : "Thermal Envelope"}
       </div>
     </div>
