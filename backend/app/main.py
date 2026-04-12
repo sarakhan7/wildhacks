@@ -31,12 +31,16 @@ storage_service = DocumentStorageService(
 )
 repository = AuditRepository(conn, settings.upload_dir, storage_service)
 queue = AuditJobQueue(settings.max_workers)
+peer_data_path = Path(__file__).resolve().parents[1] / "data" / "cbecs_2018_public_use_peers.csv"
+if not peer_data_path.exists():
+    peer_data_path = Path(__file__).resolve().parents[1] / "data" / "cbecs_clusters.json"
+
 pipeline = AuditPipeline(
     repository=repository,
     ocr_service=OCRService(settings.gemini_api_key, settings.ocr_model),
     weather_service=WeatherService(settings.noaa_api_token),
     reasoning_service=ReasoningService(settings.gemini_api_key, settings.reasoning_model),
-    peer_service=PeerClusterService(Path(__file__).resolve().parents[1] / "data" / "cbecs_clusters.json"),
+    peer_service=PeerClusterService(peer_data_path),
 )
 
 

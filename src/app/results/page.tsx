@@ -10,7 +10,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { getBenchmarkForType } from "@/lib/benchmarks";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GaugeChart } from "@/components/ui/GaugeChart";
-import { BatteryWarning, Leaf, Zap, FileText, ArrowUpRight, TrendingDown, ThermometerSnowflake, DollarSign, AlertTriangle } from "lucide-react";
+import { BatteryWarning, Leaf, Zap, FileText, ArrowUpRight, TrendingDown, ThermometerSnowflake, DollarSign, AlertTriangle, Orbit, SunMedium, Waves } from "lucide-react";
 import { motion } from "framer-motion";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
@@ -302,43 +302,84 @@ export default function ResultsDashboard() {
             </div>
           </GlassCard>
 
-          {/* Map context */}
-          <GlassCard className="p-0 overflow-hidden h-[250px] relative">
-             <Map
+          <GlassCard className="relative overflow-hidden p-0">
+            <div className="relative h-[250px] overflow-hidden">
+              <Map
                 mapboxAccessToken={MAPBOX_TOKEN}
                 initialViewState={{
                   longitude: buildingInfo.lng,
                   latitude: buildingInfo.lat,
                   zoom: 16,
-                  pitch: 60,
-                  bearing: 20
+                  pitch: 58,
+                  bearing: 22
                 }}
                 mapStyle="mapbox://styles/mapbox/satellite-v9"
                 attributionControl={false}
                 interactive={false}
               >
                 <Marker longitude={buildingInfo.lng} latitude={buildingInfo.lat} color="#00e586" />
-                
-                {/* 3D Buildings Layer context if possible */}
-                <Layer 
+                <Layer
                   id="3d-buildings"
                   source="composite"
                   source-layer="building"
-                  filter={['==', 'extrude', 'true']}
+                  filter={["==", ["get", "extrude"], "true"]}
                   type="fill-extrusion"
                   paint={{
-                    'fill-extrusion-color': '#06b6d4',
-                    'fill-extrusion-height': ['get', 'height'],
-                    'fill-extrusion-opacity': 0.6
+                    "fill-extrusion-color": "#06b6d4",
+                    "fill-extrusion-height": ["coalesce", ["to-number", ["get", "height"]], 0],
+                    "fill-extrusion-base": ["coalesce", ["to-number", ["get", "min_height"]], 0],
+                    "fill-extrusion-opacity": 0.38
                   }}
                 />
               </Map>
-              <div className="absolute inset-0 ring-1 ring-inset ring-white/10 pointer-events-none rounded-2xl" />
-              <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/80 to-transparent p-4 pt-12">
-                <div className="flex items-center gap-2 text-sm font-medium">
+
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,7,18,0.05),rgba(3,7,18,0.66))]" />
+              <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-[rgba(255,196,77,0.35)] bg-[rgba(255,196,77,0.14)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-amber)]">
+                <SunMedium className="h-3.5 w-3.5" /> Google Solar Ready
+              </div>
+              <div className="absolute bottom-0 w-full p-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
                   <Leaf className="w-4 h-4 text-green-400" /> Climate Zone: {climateZone}
                 </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  <span className="rounded-full border border-[rgba(6,182,212,0.28)] bg-[rgba(6,182,212,0.14)] px-3 py-1.5 text-cyan-100">
+                    Real roof flux
+                  </span>
+                  <span className="rounded-full border border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.1)] px-3 py-1.5 text-rose-100">
+                    Thermal particles
+                  </span>
+                </div>
               </div>
+            </div>
+
+            <div className="border-t border-[var(--border-subtle)] p-5">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-[rgba(6,182,212,0.14)] p-3 text-[var(--accent-cyan)]">
+                  <Orbit className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-lg font-heading font-semibold text-white">
+                    Open the 3D audit view
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                    Inspect roof solar flux from Google Solar, modeled facade heat loss, and cinematic heat-flow particles in a dedicated scene.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
+                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5">
+                  <SunMedium className="h-3.5 w-3.5 text-[var(--accent-amber)]" /> Roof heatmap
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5">
+                  <Waves className="h-3.5 w-3.5 text-[var(--accent-red)]" /> Particle flow
+                </span>
+              </div>
+
+              <Link href="/results/3d" className="btn-primary mt-5 flex w-full items-center justify-center gap-2 py-3">
+                <Orbit className="h-4 w-4" /> Open 3D View
+              </Link>
+            </div>
           </GlassCard>
 
           <GlassCard className="p-6">
