@@ -65,6 +65,7 @@ type ExteriorEdge = {
   length: number;
   hotspots: number[];
   emitterWeight: number;
+  entranceWeight: number;
 };
 
 type LayerState = {
@@ -309,9 +310,8 @@ function resolveFootprints(
 ): { parts: BuildingPart[]; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null {
   try {
     const point = map.project([data.building.lng, data.building.lat]);
-    const queryRadius = 220;
     const rendered = map.queryRenderedFeatures(
-      [[point.x - queryRadius, point.y - queryRadius], [point.x + queryRadius, point.y + queryRadius]],
+      [[point.x - 120, point.y - 120], [point.x + 120, point.y + 120]],
       { layers: ["visualization-context-buildings"] },
     );
 
@@ -407,48 +407,6 @@ function resolveFootprints(
     }
 
     const clusteredRings = Array.from(selected).map((index) => candidateRings[index]);
-    const supplementalRings = unfilteredRings
-      .map((ringRecord) => {
-        const localRing = sanitizeFootprint(
-          featureCoordinatesToLocal(ringRecord.ring, data.building.lng, data.building.lat),
-        );
-        if (localRing.length < 3) {
-          return null;
-        }
-        return {
-          ...ringRecord,
-          localRing,
-          localCentroid: centroidOfLocalRing(localRing),
-        };
-      })
-      .filter(
-        (
-          ringRecord,
-        ): ringRecord is {
-          ring: [number, number][];
-          height: number;
-          localRing: LocalPoint[];
-          localCentroid: LocalPoint;
-        } => Boolean(ringRecord),
-      )
-      .filter(
-        (ringRecord) =>
-          !clusteredRings.some(
-            (clustered) =>
-              clustered.ring === ringRecord.ring ||
-              clustered.localRing === ringRecord.localRing ||
-              centroidDistance(clustered.localCentroid, ringRecord.localCentroid) < 0.6,
-          ),
-      )
-      .filter((ringRecord) =>
-        clusteredRings.some(
-          (clustered) =>
-            ringsConnected(clustered.ring, ringRecord.ring) ||
-            localRingsNear(clustered.localRing, ringRecord.localRing, 12),
-        ),
-      );
-
-    clusteredRings.push(...supplementalRings);
 
     const parts: BuildingPart[] = [];
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -515,13 +473,14 @@ function clamp01(value: number) {
   return Math.min(1, Math.max(0, value));
 }
 
+function seededNoise(seed: number) {
+  const value = Math.sin(seed * 127.1) * 43758.5453123;
+  return value - Math.floor(value);
+}
+
 function centroidOfLocalRing(ring: LocalPoint[]) {
   const sum = ring.reduce((acc, point) => ({ x: acc.x + point.x, z: acc.z + point.z }), { x: 0, z: 0 });
   return { x: sum.x / ring.length, z: sum.z / ring.length };
-}
-
-function centroidDistance(a: LocalPoint, b: LocalPoint) {
-  return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
 function pointInLocalRing(point: LocalPoint, ring: LocalPoint[]) {
@@ -1255,13 +1214,14 @@ function buildExteriorEdges(
       const kind = resolveWallKind(normal);
       const hotspots = localEntrances
         .map((entry) => ({ entry, ...projectPointToSegment(entry.point, edge.start, edge.end) }))
-        .filter((candidate) => candidate.distance <= 4.2)
+        .filter((candidate) => candidate.distance <= 5.4)
         .map((candidate) => candidate.t)
         .sort((a, b) => a - b)
         .filter((value, index, list) => index === 0 || Math.abs(value - list[index - 1]) > 0.08)
         .slice(0, 4);
 
-      const emitterWeight = clamp01((surfaceFluxByKind[kind] ?? 0) / 32);
+      const entranceWeight = clamp01(hotspots.length * 0.32);
+      const emitterWeight = clamp01((surfaceFluxByKind[kind] ?? 0) / 34 + entranceWeight * 0.36);
       return {
         start: edge.start,
         end: edge.end,
@@ -1272,6 +1232,7 @@ function buildExteriorEdges(
         length,
         hotspots,
         emitterWeight,
+        entranceWeight,
       } satisfies ExteriorEdge;
     });
 }
@@ -1339,143 +1300,151 @@ function buildWallMeshes(
 }
 
 function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
-  const positions: number[] = [];
-  const progressValues: number[] = [];
-  const seeds: number[] = [];
-  const intensities: number[] = [];
-  const coolness: number[] = [];
-  const sizes: number[] = [];
-  type Stream = {
-    edge: ExteriorEdge;
-    t: number;
-    index: number;
-    cool: boolean;
-    entranceDriven: boolean;
-  };
-
-  const warmEdges = exteriorEdges
-    .filter((edge) => edge.length >= 7 && edge.emitterWeight >= 0.12)
-    .sort((a, b) => b.emitterWeight * b.length - a.emitterWeight * a.length)
-    .slice(0, 4);
-  const coolEdges = exteriorEdges
-    .filter((edge) => edge.hotspots.length > 0 && edge.length >= 3)
-    .sort((a, b) => b.hotspots.length * b.length - a.hotspots.length * a.length)
-    .slice(0, 3);
-
-  const streams: Stream[] = [
-    ...warmEdges.flatMap((edge) => {
-      const emitters = edge.hotspots.length > 0 ? edge.hotspots.slice(0, 2) : edge.length > 18 ? [0.32, 0.68] : [0.5];
-      return emitters.map((t, index) => ({
-        edge,
-        t,
-        index,
-        cool: false,
-        entranceDriven: edge.hotspots.length > 0,
-      }));
-    }),
-    ...coolEdges.flatMap((edge) =>
-      edge.hotspots.slice(0, 2).map((t, index) => ({
-        edge,
-        t,
-        index,
-        cool: true,
-        entranceDriven: true,
-      })),
-    ),
-  ];
-
-  streams.forEach(({ edge, t, index, cool, entranceDriven }, streamIndex) => {
-    const baseAnchor = {
-      x: edge.start.x + (edge.end.x - edge.start.x) * clamp01(t),
-      z: edge.start.z + (edge.end.z - edge.start.z) * clamp01(t),
-    };
-    const filamentCount = entranceDriven ? 2 : 1;
-
-    for (let filament = 0; filament < filamentCount; filament += 1) {
-      const spread = filament - (filamentCount - 1) * 0.5;
-      const seed = streamIndex * 0.43 + index * 0.37 + filament * 0.19;
-      const anchor = {
-        x: baseAnchor.x + edge.tangent.x * spread * (cool ? 0.85 : 1.15),
-        z: baseAnchor.z + edge.tangent.z * spread * (cool ? 0.85 : 1.15),
-      };
-      const baseY = Math.min(Math.max(edge.height * 0.18, 1.6), 4.0);
-
-      const start = cool
-        ? new THREE.Vector3(
-            anchor.x - edge.normal.x * 11.5,
-            baseY + 1.1,
-            anchor.z - edge.normal.z * 11.5,
-          )
-        : new THREE.Vector3(
-            anchor.x + edge.normal.x * 0.4,
-            baseY,
-            anchor.z + edge.normal.z * 0.4,
-          );
-      const cp1 = cool
-        ? new THREE.Vector3(
-            anchor.x - edge.normal.x * 7.2 + edge.tangent.x * spread * 1.1,
-            baseY + 2.2,
-            anchor.z - edge.normal.z * 7.2 + edge.tangent.z * spread * 1.1,
-          )
-        : new THREE.Vector3(
-            start.x + edge.normal.x * (4.6 + edge.emitterWeight * 2.4) + edge.tangent.x * spread * 1.2,
-            baseY + 1.5,
-            start.z + edge.normal.z * (4.6 + edge.emitterWeight * 2.4) + edge.tangent.z * spread * 1.2,
-          );
-      const cp2 = cool
-        ? new THREE.Vector3(
-            anchor.x - edge.normal.x * 3.0 + edge.tangent.x * spread * 0.7,
-            baseY + 1.0,
-            anchor.z - edge.normal.z * 3.0 + edge.tangent.z * spread * 0.7,
-          )
-        : new THREE.Vector3(
-            start.x + edge.normal.x * (10.8 + edge.emitterWeight * 4.1) + edge.tangent.x * spread * 2.4,
-            baseY + 5.2 + edge.emitterWeight * 2.1,
-            start.z + edge.normal.z * (10.8 + edge.emitterWeight * 4.1) + edge.tangent.z * spread * 2.4,
-          );
-      const end = cool
-        ? new THREE.Vector3(
-            anchor.x - edge.normal.x * 0.2,
-            baseY + 0.35,
-            anchor.z - edge.normal.z * 0.2,
-          )
-        : new THREE.Vector3(
-            start.x + edge.normal.x * (16.5 + edge.emitterWeight * 6.8) + edge.tangent.x * spread * 3.8,
-            baseY + 9.2 + edge.emitterWeight * 4.0,
-            start.z + edge.normal.z * (16.5 + edge.emitterWeight * 6.8) + edge.tangent.z * spread * 3.8,
-          );
-
-      const curve = new THREE.CubicBezierCurve3(start, cp1, cp2, end);
-      const pointCount = cool ? 34 : 42;
-      const curvePoints = curve.getPoints(pointCount - 1);
-      const baseIntensity = cool ? 0.58 : 0.78 + edge.emitterWeight * 0.22;
-
-      curvePoints.forEach((point, pointIndex) => {
-        const progress = pointIndex / Math.max(curvePoints.length - 1, 1);
-        positions.push(point.x, point.y, point.z);
-        progressValues.push(progress);
-        seeds.push(seed);
-        intensities.push(baseIntensity * (1 - progress * 0.18));
-        coolness.push(cool ? 1 : 0);
-        sizes.push(cool ? 2.4 : entranceDriven ? 3.2 : 2.8);
-      });
-    }
-  });
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("aProgress", new THREE.Float32BufferAttribute(progressValues, 1));
-  geometry.setAttribute("aSeed", new THREE.Float32BufferAttribute(seeds, 1));
-  geometry.setAttribute("aIntensity", new THREE.Float32BufferAttribute(intensities, 1));
-  geometry.setAttribute("aCool", new THREE.Float32BufferAttribute(coolness, 1));
-  geometry.setAttribute("aSize", new THREE.Float32BufferAttribute(sizes, 1));
-
   const uniforms = {
     uTime: { value: 0 },
     uVisible: { value: 1 },
   };
 
-  const material = new THREE.ShaderMaterial({
+  const group = new THREE.Group();
+
+  const linePositions: number[] = [];
+  const lineProgressValues: number[] = [];
+  const lineSeeds: number[] = [];
+  const lineIntensities: number[] = [];
+  const lineEntranceValues: number[] = [];
+
+  const pointPositions: number[] = [];
+  const pointProgressValues: number[] = [];
+  const pointSeeds: number[] = [];
+  const pointIntensities: number[] = [];
+  const pointEntranceValues: number[] = [];
+  const pointSizes: number[] = [];
+
+  const candidateEdges = exteriorEdges
+    .filter((edge) => edge.length >= 2.5 && (edge.emitterWeight >= 0.04 || edge.hotspots.length > 0))
+    .sort((a, b) => b.emitterWeight * b.length + b.entranceWeight - (a.emitterWeight * a.length + a.entranceWeight));
+
+  const streamLimit = Math.min(28, Math.max(12, candidateEdges.length * 3));
+
+  candidateEdges.slice(0, streamLimit).forEach((edge, edgeIndex) => {
+    const facadeSamples = Math.max(3, Math.min(8, Math.round(edge.length / 7 + edge.emitterWeight * 5)));
+    const baseEmitters = Array.from({ length: facadeSamples }, (_, index) => (index + 0.5) / facadeSamples);
+    const entranceEmitters = edge.hotspots.flatMap((hotspot) => [
+      clamp01(hotspot - 0.06),
+      hotspot,
+      clamp01(hotspot + 0.06),
+    ]);
+    const emitters = [...baseEmitters, ...entranceEmitters]
+      .sort((a, b) => a - b)
+      .filter((value, index, list) => index === 0 || Math.abs(value - list[index - 1]) > 0.035);
+
+    emitters.forEach((t, emitterIndex) => {
+      const hotspotDistance =
+        edge.hotspots.length > 0
+          ? Math.min(...edge.hotspots.map((hotspot) => Math.abs(hotspot - t)))
+          : 1;
+      const entranceInfluence = edge.hotspots.length > 0 ? Math.exp(-Math.pow(hotspotDistance * 18, 2)) : 0;
+      const localHeat = clamp01(edge.emitterWeight * 0.78 + entranceInfluence * 0.7 + edge.entranceWeight * 0.18);
+      const strandCount = Math.max(
+        3,
+        Math.min(8, 3 + Math.round(localHeat * 3.2) + (entranceInfluence > 0.28 ? 2 : 0)),
+      );
+      const baseAnchor = {
+        x: edge.start.x + (edge.end.x - edge.start.x) * t,
+        z: edge.start.z + (edge.end.z - edge.start.z) * t,
+      };
+
+      for (let strand = 0; strand < strandCount; strand += 1) {
+        const seed = edgeIndex * 9.17 + emitterIndex * 1.83 + strand * 0.71;
+        const tangentJitter = (seededNoise(seed + 0.4) - 0.5) * (1.4 + entranceInfluence * 2.4);
+        const swirlDirection = seededNoise(seed + 1.1) > 0.5 ? 1 : -1;
+        const outletBias = seededNoise(seed + 2.8);
+        const verticalMix = entranceInfluence > 0.22 ? 0.08 + seededNoise(seed + 3.6) * 0.18 : 0.18 + seededNoise(seed + 3.6) * 0.58;
+        const facadeY = Math.min(edge.height - 0.55, Math.max(0.65, edge.height * verticalMix));
+        const nearSpread = (strand - (strandCount - 1) * 0.5) * (0.55 + entranceInfluence * 0.65);
+        const start = new THREE.Vector3(
+          baseAnchor.x + edge.tangent.x * (nearSpread + tangentJitter * 0.4) + edge.normal.x * 0.38,
+          facadeY,
+          baseAnchor.z + edge.tangent.z * (nearSpread + tangentJitter * 0.4) + edge.normal.z * 0.38,
+        );
+
+        const lift = 6.8 + localHeat * 14.5 + entranceInfluence * 7.4;
+        const reach = 16.0 + localHeat * 26.0 + entranceInfluence * 16.0;
+        const swirl = (5.0 + localHeat * 9.5 + entranceInfluence * 6.5) * swirlDirection;
+        const crosswind = (seededNoise(seed + 4.4) - 0.5) * (10.0 + localHeat * 11.0 + entranceInfluence * 8.0);
+        const dissipation = 0.6 + seededNoise(seed + 4.9) * 0.22;
+        const endLift = lift * (1.22 + outletBias * 0.48);
+        const farOffset = reach * (1.05 + seededNoise(seed + 5.3) * 0.42);
+
+        const guidePoints = [
+          start,
+          new THREE.Vector3(
+            start.x + edge.normal.x * (4.2 + localHeat * 2.8) + edge.tangent.x * (tangentJitter + swirl * 0.22),
+            facadeY + 1.6 + lift * 0.16,
+            start.z + edge.normal.z * (4.2 + localHeat * 2.8) + edge.tangent.z * (tangentJitter + swirl * 0.22),
+          ),
+          new THREE.Vector3(
+            start.x + edge.normal.x * (10.5 + localHeat * 6.0) + edge.tangent.x * (swirl * 0.85 + crosswind * 0.18),
+            facadeY + 3.5 + lift * 0.34,
+            start.z + edge.normal.z * (10.5 + localHeat * 6.0) + edge.tangent.z * (swirl * 0.85 + crosswind * 0.18),
+          ),
+          new THREE.Vector3(
+            start.x + edge.normal.x * (farOffset * 0.48) + edge.tangent.x * (swirl * 1.25 + crosswind * 0.52),
+            facadeY + 6.8 + lift * 0.68,
+            start.z + edge.normal.z * (farOffset * 0.48) + edge.tangent.z * (swirl * 1.25 + crosswind * 0.52),
+          ),
+          new THREE.Vector3(
+            start.x + edge.normal.x * farOffset + edge.tangent.x * (swirl * 0.92 + crosswind + tangentJitter * 0.45),
+            facadeY + endLift,
+            start.z + edge.normal.z * farOffset + edge.tangent.z * (swirl * 0.92 + crosswind + tangentJitter * 0.45),
+          ),
+        ];
+
+        const curve = new THREE.CatmullRomCurve3(guidePoints, false, "catmullrom", 0.38);
+        const pointCount = Math.max(30, Math.min(58, Math.round(34 + localHeat * 14 + entranceInfluence * 10)));
+        const curvePoints = curve.getPoints(pointCount - 1);
+        const baseIntensity = 0.38 + localHeat * 0.36 + entranceInfluence * 0.12;
+        const pointStride = entranceInfluence > 0.18 ? 2 : 3;
+
+        curvePoints.forEach((point, pointIndex) => {
+          const progress = pointIndex / Math.max(curvePoints.length - 1, 1);
+          const intensity = baseIntensity * Math.pow(1 - progress * 0.72, 0.72) * (1.08 - progress * 0.16);
+
+          if (pointIndex < curvePoints.length - 1) {
+            const nextPoint = curvePoints[pointIndex + 1];
+            const nextProgress = (pointIndex + 1) / Math.max(curvePoints.length - 1, 1);
+            const nextIntensity =
+              baseIntensity *
+              Math.pow(1 - nextProgress * 0.72, 0.72) *
+              (1.08 - nextProgress * 0.16);
+            linePositions.push(point.x, point.y, point.z, nextPoint.x, nextPoint.y, nextPoint.z);
+            lineProgressValues.push(progress, nextProgress);
+            lineSeeds.push(seed, seed);
+            lineIntensities.push(intensity, nextIntensity);
+            lineEntranceValues.push(entranceInfluence, entranceInfluence);
+          }
+
+          if (pointIndex % pointStride === 0 || pointIndex === curvePoints.length - 1) {
+            pointPositions.push(point.x, point.y, point.z);
+            pointProgressValues.push(progress);
+            pointSeeds.push(seed + pointIndex * 0.011);
+            pointIntensities.push(intensity * dissipation);
+            pointEntranceValues.push(entranceInfluence);
+            pointSizes.push(2.1 + localHeat * 1.4 + entranceInfluence * 1.2 + (1 - progress) * 0.9);
+          }
+        });
+      }
+    });
+  });
+
+  const lineGeometry = new THREE.BufferGeometry();
+  lineGeometry.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
+  lineGeometry.setAttribute("aProgress", new THREE.Float32BufferAttribute(lineProgressValues, 1));
+  lineGeometry.setAttribute("aSeed", new THREE.Float32BufferAttribute(lineSeeds, 1));
+  lineGeometry.setAttribute("aIntensity", new THREE.Float32BufferAttribute(lineIntensities, 1));
+  lineGeometry.setAttribute("aEntrance", new THREE.Float32BufferAttribute(lineEntranceValues, 1));
+
+  const lineMaterial = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     depthTest: true,
@@ -1485,22 +1454,21 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
       attribute float aProgress;
       attribute float aSeed;
       attribute float aIntensity;
-      attribute float aCool;
-      attribute float aSize;
-      uniform float uTime;
+      attribute float aEntrance;
       varying float vProgress;
       varying float vSeed;
       varying float vIntensity;
-      varying float vCool;
+      varying float vEntrance;
+      varying float vDistance;
 
       void main() {
         vProgress = aProgress;
         vSeed = aSeed;
         vIntensity = aIntensity;
-        vCool = aCool;
+        vEntrance = aEntrance;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vDistance = -mvPosition.z;
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = aSize * (165.0 / max(18.0, -mvPosition.z));
       }
     `,
     fragmentShader: `
@@ -1509,29 +1477,112 @@ function createParticleSystem(exteriorEdges: ExteriorEdge[]) {
       varying float vProgress;
       varying float vSeed;
       varying float vIntensity;
-      varying float vCool;
+      varying float vEntrance;
+      varying float vDistance;
+
+      void main() {
+        float flowSpeed = mix(0.18, 0.3, clamp(vIntensity, 0.0, 1.0));
+        float pulsePhase = fract(vProgress * (1.7 + vEntrance * 0.35) - uTime * flowSpeed + vSeed * 0.29);
+        float pulse = exp(-pow((pulsePhase - 0.16) * 7.2, 2.0));
+        float shimmer = sin(vSeed * 9.0 + uTime * 2.2 + vProgress * 15.0) * 0.5 + 0.5;
+        float core = pow(1.0 - vProgress, 0.22);
+        float dissipate = 1.0 - smoothstep(0.58, 1.0, vProgress);
+        float farFade = 1.0 - smoothstep(180.0, 340.0, vDistance);
+        vec3 deepRed = vec3(0.58, 0.02, 0.01);
+        vec3 hotRed = vec3(0.96, 0.08, 0.03);
+        vec3 ember = vec3(1.0, 0.36, 0.08);
+        vec3 smoke = vec3(0.52, 0.08, 0.06);
+        vec3 color = mix(smoke, deepRed, smoothstep(0.36, 0.0, vProgress));
+        color = mix(color, hotRed, 0.42 + shimmer * 0.18);
+        color = mix(color, ember, pulse * 0.42 + vEntrance * 0.16);
+        float alpha = (0.04 + vIntensity * 0.12 + vEntrance * 0.04) * core * dissipate * farFade;
+        alpha += pulse * (0.04 + vIntensity * 0.04) * farFade;
+        gl_FragColor = vec4(color, alpha * uVisible);
+      }
+    `,
+  });
+
+  const streamlines = new THREE.LineSegments(lineGeometry, lineMaterial);
+  streamlines.renderOrder = 4;
+  group.add(streamlines);
+
+  const pointGeometry = new THREE.BufferGeometry();
+  pointGeometry.setAttribute("position", new THREE.Float32BufferAttribute(pointPositions, 3));
+  pointGeometry.setAttribute("aProgress", new THREE.Float32BufferAttribute(pointProgressValues, 1));
+  pointGeometry.setAttribute("aSeed", new THREE.Float32BufferAttribute(pointSeeds, 1));
+  pointGeometry.setAttribute("aIntensity", new THREE.Float32BufferAttribute(pointIntensities, 1));
+  pointGeometry.setAttribute("aEntrance", new THREE.Float32BufferAttribute(pointEntranceValues, 1));
+  pointGeometry.setAttribute("aSize", new THREE.Float32BufferAttribute(pointSizes, 1));
+
+  const pointMaterial = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.AdditiveBlending,
+    uniforms,
+    vertexShader: `
+      attribute float aProgress;
+      attribute float aSeed;
+      attribute float aIntensity;
+      attribute float aEntrance;
+      attribute float aSize;
+      uniform float uTime;
+      varying float vProgress;
+      varying float vSeed;
+      varying float vIntensity;
+      varying float vEntrance;
+      varying float vDistance;
+
+      void main() {
+        vProgress = aProgress;
+        vSeed = aSeed;
+        vIntensity = aIntensity;
+        vEntrance = aEntrance;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vDistance = -mvPosition.z;
+        gl_Position = projectionMatrix * mvPosition;
+        float perspective = 88.0 / max(52.0, -mvPosition.z);
+        float distanceClamp = 1.0 - smoothstep(150.0, 320.0, -mvPosition.z);
+        gl_PointSize = min(7.2, aSize * perspective * distanceClamp);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uVisible;
+      varying float vProgress;
+      varying float vSeed;
+      varying float vIntensity;
+      varying float vEntrance;
+      varying float vDistance;
 
       void main() {
         vec2 centered = gl_PointCoord - 0.5;
-        float radial = 1.0 - smoothstep(0.14, 0.5, length(centered));
+        float radial = 1.0 - smoothstep(0.1, 0.46, length(centered));
         float speed = mix(0.16, 0.28, clamp(vIntensity, 0.0, 1.0));
-        float phase = fract(vProgress * mix(1.3, 1.75, vCool) - uTime * speed + vSeed);
-        float pulse = exp(-pow((phase - 0.2) * 9.5, 2.0));
-        float trail = smoothstep(0.0, 0.06, vProgress) * smoothstep(1.0, 0.7, vProgress);
-        float shimmer = sin(vSeed * 19.0 + uTime * 2.4 + vProgress * 10.0) * 0.5 + 0.5;
-        vec3 warm = mix(vec3(0.96, 0.54, 0.12), vec3(1.0, 0.78, 0.22), 0.32 + shimmer * 0.12);
-        vec3 cool = mix(vec3(0.0, 0.72, 0.92), vec3(0.18, 0.94, 1.0), 0.28 + shimmer * 0.12);
-        vec3 color = mix(warm, cool, vCool);
-        color += mix(vec3(0.32, 0.1, 0.0), vec3(0.0, 0.26, 0.62), vCool) * pulse * 0.14;
-        float alpha = radial * trail * (0.08 + pulse * 0.48) * (0.56 + vIntensity * 0.24) * uVisible;
+        float phase = fract(vProgress * (1.35 + vEntrance * 0.26) - uTime * speed + vSeed);
+        float pulse = exp(-pow((phase - 0.22) * 7.0, 2.0));
+        float trail = smoothstep(0.0, 0.05, vProgress) * smoothstep(1.0, 0.56, vProgress);
+        float shimmer = sin(vSeed * 17.0 + uTime * 2.4 + vProgress * 9.5) * 0.5 + 0.5;
+        float farFade = 1.0 - smoothstep(120.0, 260.0, vDistance);
+        vec3 ember = mix(vec3(1.0, 0.24, 0.06), vec3(1.0, 0.56, 0.12), 0.28 + shimmer * 0.14);
+        vec3 color = mix(vec3(0.58, 0.05, 0.03), ember, 0.54 + pulse * 0.2);
+        float alpha =
+          radial *
+          trail *
+          (0.05 + pulse * 0.16) *
+          (0.3 + vIntensity * 0.12 + vEntrance * 0.04) *
+          farFade *
+          uVisible;
         gl_FragColor = vec4(color, alpha);
       }
     `,
   });
 
-  const points = new THREE.Points(geometry, material);
+  const points = new THREE.Points(pointGeometry, pointMaterial);
   points.renderOrder = 4;
-  return { points, uniforms };
+  group.add(points);
+
+  return { points: group, uniforms };
 }
 
 function getMonthlyGrid(solar: SolarVisualization, month: number) {
@@ -1595,7 +1646,12 @@ function createHoverDetail(
 
 function disposeVisualizationObject(object: THREE.Object3D) {
   object.traverse((child) => {
-    if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof THREE.Points) {
+    if (
+      child instanceof THREE.Mesh ||
+      child instanceof THREE.Line ||
+      child instanceof THREE.LineSegments ||
+      child instanceof THREE.Points
+    ) {
       child.geometry.dispose();
       if (Array.isArray(child.material)) {
         child.material.forEach((material) => material.dispose());

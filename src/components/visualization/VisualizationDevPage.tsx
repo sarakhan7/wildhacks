@@ -29,11 +29,12 @@ type RoofCalibration = {
 
 const STORAGE_AUDIT_ID = "auditai.last-visualization-audit-id";
 const STORAGE_CALIBRATION = "auditai.dev.roof-calibration";
+const STORAGE_PAYLOAD_PREFIX = "auditai.visualization-payload:";
 const DEFAULT_CALIBRATION: RoofCalibration = {
-  offsetX: 0,
-  offsetY: 0,
-  scaleX: 1,
-  scaleY: 1,
+  offsetX: 0.074,
+  offsetY: -0.044,
+  scaleX: 0.55,
+  scaleY: 0.55,
   flipX: false,
   flipY: false,
 };
@@ -48,6 +49,7 @@ export default function VisualizationDevPage() {
   const [overlay, setOverlay] = useState<VisualizationOverlayMode>("both");
   const [particlesEnabled, setParticlesEnabled] = useState(true);
   const [roofCalibration, setRoofCalibration] = useState<RoofCalibration>(DEFAULT_CALIBRATION);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const scenario: VisualizationScenario = "current";
   const month = 0;
@@ -89,8 +91,20 @@ export default function VisualizationDevPage() {
 
     let active = true;
     async function load() {
+      const cached = window.localStorage.getItem(`${STORAGE_PAYLOAD_PREFIX}${auditId}`);
+      if (cached) {
+        try {
+          const payload = JSON.parse(cached) as VisualizationSceneResponse;
+          if (active) {
+            setData(payload);
+            setError("");
+          }
+        } catch {
+          window.localStorage.removeItem(`${STORAGE_PAYLOAD_PREFIX}${auditId}`);
+        }
+      }
+
       setIsLoading(true);
-      setError("");
 
       try {
         const response = await fetch(`/api/audits/${auditId}/visualization`, { cache: "no-store" });
@@ -103,11 +117,12 @@ export default function VisualizationDevPage() {
         }
         setData(payload);
         window.localStorage.setItem(STORAGE_AUDIT_ID, auditId);
+        window.localStorage.setItem(`${STORAGE_PAYLOAD_PREFIX}${auditId}`, JSON.stringify(payload));
+        setError("");
       } catch (loadError) {
         if (!active) {
           return;
         }
-        setData(null);
         setError(loadError instanceof Error ? loadError.message : "Visualization request failed");
       } finally {
         if (active) {
@@ -120,7 +135,7 @@ export default function VisualizationDevPage() {
     return () => {
       active = false;
     };
-  }, [auditId]);
+  }, [auditId, reloadNonce]);
 
   const sourceSummary = useMemo(() => {
     if (!data) {
@@ -173,10 +188,21 @@ export default function VisualizationDevPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAuditId((current) => current)}
+                  onClick={() => setReloadNonce((current) => current + 1)}
                   className="inline-flex items-center gap-2 rounded-full border border-white/65 bg-white/45 px-4 py-2 text-sm font-semibold text-navy transition hover:bg-white/65"
                 >
                   <RefreshCcw className="h-4 w-4" /> Reload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!auditId) return;
+                    window.localStorage.removeItem(`${STORAGE_PAYLOAD_PREFIX}${auditId}`);
+                    setReloadNonce((current) => current + 1);
+                  }}
+                  className="rounded-full border border-white/65 bg-white/45 px-4 py-2 text-sm font-semibold text-navy transition hover:bg-white/65"
+                >
+                  Clear Cache
                 </button>
               </div>
               <div className="mt-4 rounded-[1.2rem] border border-white/55 bg-white/30 px-4 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
