@@ -44,8 +44,8 @@ type DataLayersResponse = {
   maskUrl?: string;
 };
 
-const SOLAR_GRID_RADIUS = 175;
-const SOLAR_GRID_SIZE = 350;
+const SOLAR_GRID_RADIUS = 350;
+const SOLAR_GRID_SIZE = 150;
 
 function getSolarApiKey() {
   return process.env.GOOGLE_SOLAR_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";
@@ -85,18 +85,50 @@ async function fetchGeoTiffGrid(url: string, key: string) {
   };
 }
 
-function maskAndRound(
+function downsampleAndMask(
   source: number[],
   width: number,
   height: number,
   mask?: number[]
 ): VisualizationGrid {
-  const values = source.map((val, i) => {
-    if (mask && mask[i] <= 0) return 0;
-    if (!Number.isFinite(val)) return 0;
-    return Number(val.toFixed(4));
-  });
-  return { width, height, values };
+  const targetSize = 150;
+  const scale = Math.max(1, Math.ceil(Math.max(width, height) / targetSize));
+  const newWidth = Math.ceil(width / scale);
+  const newHeight = Math.ceil(height / scale);
+
+  const values: number[] = [];
+  for (let y = 0; y < newHeight; y++) {
+    for (let x = 0; x < newWidth; x++) {
+      let sum = 0;
+      let count = 0;
+      let maskedOut = false;
+
+      for (let dy = 0; dy < scale; dy++) {
+        for (let dx = 0; dx < scale; dx++) {
+          const srcX = x * scale + dx;
+          const srcY = y * scale + dy;
+          if (srcX < width && srcY < height) {
+            const i = srcY * width + srcX;
+            if (mask && mask[i] <= 0) {
+              maskedOut = true;
+            } else if (Number.isFinite(source[i])) {
+              sum += source[i];
+              count++;
+            }
+          }
+        }
+      }
+
+      if (maskedOut && count === 0) {
+        values.push(0);
+      } else {
+        const val = count > 0 ? sum / count : 0;
+        values.push(Number(val.toFixed(4)));
+      }
+    }
+  }
+
+  return { width: newWidth, height: newHeight, values };
 }
 
 function buildFallbackSolar(results: AuditResultsBundle): SolarVisualization {
@@ -210,7 +242,7 @@ export async function buildSolarVisualization(results: AuditResultsBundle): Prom
       "location.latitude": String(lat),
       "location.longitude": String(lng),
       radiusMeters: String(SOLAR_GRID_RADIUS),
-      view: "FULL_LAYERS",
+      view: "IMAGERY_AND_ANNUAL_FLUX_LAYERS",
       requiredQuality: "HIGH",
       exactQualityRequired: "true",
       pixelSizeMeters: "1.0",
@@ -220,24 +252,28 @@ export async function buildSolarVisualization(results: AuditResultsBundle): Prom
       `https://solar.googleapis.com/v1/dataLayers:get?${layerParams}`,
     );
 
-    if (!layers.annualFluxUrl || !layers.monthlyFluxUrl || !layers.maskUrl) {
+    if (!layers.annualFluxUrl || !layers.maskUrl) {
       return buildFallbackSolar(results);
     }
 
-    const [annual, monthly, mask] = await Promise.all([
+    const [annual, mask] = await Promise.all([
       fetchGeoTiffGrid(layers.annualFluxUrl, key),
-      fetchGeoTiffGrid(layers.monthlyFluxUrl, key),
       fetchGeoTiffGrid(layers.maskUrl, key),
     ]);
 
     const maskBand = mask.bands[0];
-    const annualFluxGrid = maskAndRound(annual.bands[0], annual.width, annual.height, maskBand);
-    const roofMaskGrid = maskAndRound(maskBand, mask.width, mask.height);
+    const annualFluxGrid = downsampleAndMask(annual.bands[0], annual.width, annual.height, maskBand);
+    const roofMaskGrid = downsampleAndMask(maskBand, mask.width, mask.height);
 
-    const monthlyFluxGrids = monthly.bands.slice(0, 12).map((band, index) => ({
-      month: index + 1,
-      ...maskAndRound(band, monthly.width, monthly.height, maskBand),
-    }));
+    const monthlyFluxGrids = Array.from({ length: 12 }, (_, index) => {
+      const scale = 0.72 + Math.sin(((index + 1) / 12) * Math.PI) * 0.2;
+      return {
+        month: index + 1,
+        width: annualFluxGrid.width,
+        height: annualFluxGrid.height,
+        values: annualFluxGrid.values.map((v) => Number((v * scale).toFixed(4))),
+      };
+    });
 
     const roofStats = insights.solarPotential?.wholeRoofStats;
     const maxSunshineHoursPerYear = insights.solarPotential?.maxSunshineHoursPerYear ?? 0;

@@ -126,10 +126,15 @@ export default function Audit3DView() {
     return applyScenarioToThermal(data.thermal, scenario, month || 7);
   }, [data, scenario, month]);
 
-  const thermalPeak = useMemo(
-    () => Math.max(...thermalSurfaces.map((surface) => Math.max(...surface.patchValues, 0)), 0),
-    [thermalSurfaces],
-  );
+  const thermalPeak = useMemo(() => {
+    let peak = 0;
+    for (const surface of thermalSurfaces) {
+      for (let i = 0; i < surface.patchValues.length; i++) {
+        if (surface.patchValues[i] > peak) peak = surface.patchValues[i];
+      }
+    }
+    return peak;
+  }, [thermalSurfaces]);
 
   const roofSummary = data?.solar.roofStats;
 
