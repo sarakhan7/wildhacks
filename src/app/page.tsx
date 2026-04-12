@@ -4,10 +4,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
+import { useCallback, useEffect, useState } from "react";
 
 import { AuditTerminal } from "@/components/site/AuditTerminal";
 import { TypewriterCycle } from "@/components/ui/TypewriterCycle";
 import { AnimateIn, StaggerGrid, StaggerItem } from "@/components/ui/AnimateIn";
+import { IntroOverlay } from "@/components/site/IntroOverlay";
 
 const stats = [
   { value: "$15K–$50K", label: "Traditional audit cost" },
@@ -98,8 +100,31 @@ const terminalLines = [
 ];
 
 export default function Home() {
+  // heroReady: panels are splitting → animate content in
+  // typewriterReady: overlay fully gone → start typewriter
+  const [heroReady, setHeroReady] = useState(false);
+  const [typewriterReady, setTypewriterReady] = useState(false);
+
+  // If intro already seen this session, skip the wait
+  useEffect(() => {
+    if (sessionStorage.getItem("auditai_intro_seen")) {
+      setHeroReady(true);
+      setTypewriterReady(true);
+    }
+  }, []);
+
+  const handleSplitting = useCallback(() => setHeroReady(true), []);
+  const handleDone = useCallback(() => setTypewriterReady(true), []);
+
+  const heroAnim = (delay = 0) => ({
+    initial: { opacity: 0, y: 28 } as const,
+    animate: { opacity: heroReady ? 1 : 0, y: heroReady ? 0 : 28 },
+    transition: { duration: 0.7, ease: [0.16, 1, 0.3, 1] as const, delay },
+  });
+
   return (
     <main className="relative overflow-hidden">
+      <IntroOverlay onSplitting={handleSplitting} onDone={handleDone} />
       {/* ─── Hero ─────────────────────────────────────────── */}
       <section className="relative min-h-screen overflow-hidden">
         <div className="hero-cloud left-[-4%] top-[10%] h-[16rem] w-[24rem] opacity-60" />
@@ -125,9 +150,7 @@ export default function Home() {
             <div className="max-w-3xl pt-0 lg:pt-10">
               <motion.h1
                 className="display-title max-w-4xl text-white [text-shadow:0_6px_32px_rgba(0,0,0,0.28)]"
-                initial={{ opacity: 0, y: 32 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+                {...heroAnim(0)}
               >
                 Your building
                 <br />
@@ -137,7 +160,9 @@ export default function Home() {
                   <span className="sr-only">$47k a year.</span>
                   <span aria-hidden="true" className="inline-flex items-baseline">
                     <span className="inline-block min-w-[5ch]">
-                      <TypewriterCycle values={["$47,000", "$200,000", "$13,000"]} className="inline-block min-w-[5ch] text-left" />
+                      {typewriterReady
+                        ? <TypewriterCycle values={["$47,000", "$200,000", "$13,000"]} className="inline-block min-w-[5ch] text-left" />
+                        : <span className="inline-block min-w-[5ch]">&nbsp;</span>}
                     </span>
                     <span className="ml-[-0.04em]"> a year.</span>
                   </span>
@@ -146,9 +171,7 @@ export default function Home() {
 
               <motion.p
                 className="mt-7 max-w-2xl text-lg font-light leading-relaxed text-white/72"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1], delay: 0.18 }}
+                {...heroAnim(0.15)}
               >
                 Upload 12 months of utility bills. Get a full prioritized energy audit with savings estimates
                 automatically. No engineer. No invoice.
@@ -156,9 +179,7 @@ export default function Home() {
 
               <motion.div
                 className="mt-10 flex flex-wrap gap-4"
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1], delay: 0.32 }}
+                {...heroAnim(0.28)}
               >
                 <Link
                   href="/audit"
@@ -173,8 +194,8 @@ export default function Home() {
             <motion.div
               className="flex items-center justify-center lg:justify-end lg:pt-10"
               initial={{ opacity: 0, x: 28 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1], delay: 0.22 }}
+              animate={{ opacity: heroReady ? 1 : 0, x: heroReady ? 0 : 28 }}
+              transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
             >
               <AuditTerminal lines={terminalLines} title="350 Fifth Ave · audit complete" />
             </motion.div>
