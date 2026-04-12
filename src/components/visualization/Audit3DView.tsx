@@ -59,7 +59,7 @@ export default function Audit3DView() {
   const [error, setError] = useState("");
   const [hovered, setHovered] = useState<HoverCard | null>(null);
   const scenario: VisualizationScenario = "current";
-  const overlay: VisualizationOverlayMode = "solar";
+  const overlay = "solar" as VisualizationOverlayMode;
   const month = 0;
   const particlesEnabled = true;
 
