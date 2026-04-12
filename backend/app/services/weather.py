@@ -12,6 +12,8 @@ from ..schemas import BuildingProfile, WeatherMonthFeature
 MONTH_LABELS = [f"2024-{index:02d}" for index in range(1, 13)]
 NOAA_CDO_BASE_URL = "https://www.ncei.noaa.gov/cdo-web/api/v2"
 NOAA_MAX_RADIUS_KM = 50.0
+NOAA_MAX_STATIONS = 3
+NOAA_REQUEST_TIMEOUT_SECONDS = 8
 
 
 class WeatherService:
@@ -38,7 +40,7 @@ class WeatherService:
         if self.noaa_api_token:
             try:
                 stations = self._find_candidate_stations(building.lat, building.lng, requested_months)
-                for station in stations:
+                for station in stations[:NOAA_MAX_STATIONS]:
                     try:
                         return self._fetch_monthly_features_from_noaa(station, requested_months)
                     except RuntimeError:
@@ -196,10 +198,12 @@ class WeatherService:
             headers={"token": self.noaa_api_token},
         )
         try:
-            with request.urlopen(req, timeout=30) as response:
+            with request.urlopen(req, timeout=NOAA_REQUEST_TIMEOUT_SECONDS) as response:
                 return json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             raise RuntimeError(exc.read().decode("utf-8")) from exc
+        except Exception as exc:
+            raise RuntimeError(str(exc)) from exc
 
 
 def _month_bounds(months: list[str]) -> tuple[date, date]:

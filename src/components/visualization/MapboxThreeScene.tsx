@@ -732,9 +732,11 @@ export default function MapboxThreeScene({
         }
 
         const mapMatrix = new THREE.Matrix4().fromArray(matrix as number[]);
+        const rotationX = new THREE.Matrix4().makeRotationX(Math.PI / 2);
         const transform = new THREE.Matrix4()
           .makeTranslation(layerState.anchor.x, layerState.anchor.y, layerState.anchor.z)
-          .scale(new THREE.Vector3(layerState.meterScale, -layerState.meterScale, layerState.meterScale));
+          .scale(new THREE.Vector3(layerState.meterScale, -layerState.meterScale, layerState.meterScale))
+          .multiply(rotationX);
 
         layerState.camera.projectionMatrix = mapMatrix.multiply(transform);
         layerState.camera.projectionMatrixInverse.copy(layerState.camera.projectionMatrix).invert();

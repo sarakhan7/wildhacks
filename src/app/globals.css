@@ -80,13 +80,20 @@
 }
 
 html {
+  min-height: 100%;
   scroll-behavior: smooth;
+  background: var(--gradient-sky);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-size: cover;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--gradient-sky);
+  position: relative;
+  isolation: isolate;
+  background: transparent;
   color: var(--text-primary);
   font-family: var(--font-main);
   -webkit-font-smoothing: antialiased;
@@ -97,12 +104,25 @@ body::before {
   content: "";
   position: fixed;
   inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background: var(--gradient-sky);
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
   background:
     radial-gradient(circle at 12% 16%, rgba(255, 255, 255, 0.65) 0%, transparent 22%),
     radial-gradient(circle at 88% 14%, rgba(255, 255, 255, 0.45) 0%, transparent 18%),
     radial-gradient(circle at 50% 8%, rgba(255, 255, 255, 0.3) 0%, transparent 16%);
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 a {
