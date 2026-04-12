@@ -14,7 +14,7 @@ from .weather_fixtures import save_fixture, try_load_fixture_by_month
 MONTH_LABELS = [f"2024-{index:02d}" for index in range(1, 13)]
 NOAA_CDO_BASE_URL = "https://www.ncei.noaa.gov/cdo-web/api/v2"
 NOAA_MAX_RADIUS_KM = 50.0
-NOAA_MAX_STATIONS = 3
+NOAA_MAX_STATIONS = 10
 NOAA_REQUEST_TIMEOUT_SECONDS = 8
 
 
@@ -39,9 +39,6 @@ class WeatherService:
         if not requested_months:
             return []
 
-        if not settings.prod:
-            return self._materialize_weather_from_fixture_or_fallback(building, requested_months)
-
         features: list[WeatherMonthFeature] | None = None
         if self.noaa_api_token:
             try:
@@ -57,7 +54,10 @@ class WeatherService:
                 pass
 
         if features is None:
-            features = self._build_fallback_monthly_features(building, requested_months)
+            if not settings.prod:
+                features = self._materialize_weather_from_fixture_or_fallback(building, requested_months)
+            else:
+                features = self._build_fallback_monthly_features(building, requested_months)
 
         save_fixture(requested_months, features)
 
@@ -143,7 +143,13 @@ class WeatherService:
                 continue
             viable.append((distance_km, candidate))
 
-        viable.sort(key=lambda item: (item[0], -float(item[1].get("datacoverage") or 0.0)))
+        viable.sort(
+            key=lambda item: (
+                _station_temperature_priority(str(item[1].get("id") or "")),
+                item[0],
+                -float(item[1].get("datacoverage") or 0.0),
+            )
+        )
         return [candidate for _distance_km, candidate in viable]
 
     def _fetch_monthly_features_from_noaa(
@@ -257,6 +263,18 @@ def _bounding_box(lat: float, lng: float, radius_km: float) -> tuple[float, floa
     lng_scale = max(cos(radians(lat)), 0.01)
     lng_delta = radius_km / (111.320 * lng_scale)
     return (lat - lat_delta, lng - lng_delta, lat + lat_delta, lng + lng_delta)
+
+
+def _station_temperature_priority(station_id: str) -> int:
+    if station_id.startswith("GHCND:USW"):
+        return 0
+    if station_id.startswith("GHCND:USC"):
+        return 1
+    if station_id.startswith("GHCND:CA"):
+        return 2
+    if station_id.startswith("GHCND:US1"):
+        return 4
+    return 3
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

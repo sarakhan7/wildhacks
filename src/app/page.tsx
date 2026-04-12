@@ -133,7 +133,7 @@ export default function Home() {
 
               <div className="mt-10 flex flex-wrap gap-4">
                 <Link
-                  href="/report?demo=1"
+                  href="/audit"
                   className="btn-secondary border-white/35 bg-white/12 px-8 py-4 text-[1rem] text-white hover:bg-white/20"
                 >
                   Run the live demo <ArrowRight className="h-4 w-4" />

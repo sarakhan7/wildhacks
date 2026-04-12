@@ -19,6 +19,7 @@ import { useAudit } from "@/context/AuditContext";
 import { FileUpload } from "@/components/ui/FileUpload";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { LoadingPipeline } from "@/components/ui/LoadingPipeline";
+import type { BuildingInfo } from "@/lib/analysis";
 import type { AuditResultsBundle, AuditStatus } from "@/lib/audit-api";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
@@ -32,6 +33,8 @@ const steps = [
 
 const buildingTypes = [
   { value: "office", label: "Office" },
+  { value: "university", label: "College / University" },
+  { value: "lab", label: "Laboratory" },
   { value: "retail", label: "Retail Store" },
   { value: "multifamily", label: "Multifamily Housing" },
   { value: "hospital", label: "Hospital / Healthcare" },
@@ -63,6 +66,45 @@ type LocationSuggestion = {
   feature_type: string;
   center: [number, number];
 };
+
+const TECH_INSTITUTE_PROFILE_PRESET: Partial<BuildingInfo> = {
+  buildingType: "university",
+  squareFeet: 800000,
+  floors: 5,
+  operatingHours: 82,
+};
+
+function getLocationProfilePreset(feature: LocationSuggestion): Partial<BuildingInfo> {
+  const normalized = `${feature.name} ${feature.full_address}`.toLowerCase();
+  if (
+    normalized.includes("technological institute") ||
+    normalized.includes("2145 sheridan") ||
+    (normalized.includes("northwestern") && normalized.includes("evanston"))
+  ) {
+    return TECH_INSTITUTE_PROFILE_PRESET;
+  }
+  return {};
+}
+
+function getMissingProfileFields(buildingInfo: BuildingInfo): string[] {
+  const missing: string[] = [];
+  if (!buildingInfo.address.trim()) {
+    missing.push("location");
+  }
+  if (buildingInfo.squareFeet <= 0) {
+    missing.push("gross floor area");
+  }
+  if (buildingInfo.yearBuilt < 1800) {
+    missing.push("year built");
+  }
+  if (buildingInfo.floors <= 0) {
+    missing.push("floor count");
+  }
+  if (buildingInfo.operatingHours <= 0) {
+    missing.push("weekly operating hours");
+  }
+  return missing;
+}
 
 export default function AuditWizard() {
   const router = useRouter();
@@ -109,6 +151,7 @@ export default function AuditWizard() {
   };
 
   const selectLocation = (feature: LocationSuggestion) => {
+    const preset = getLocationProfilePreset(feature);
     skipNextAutocompleteRef.current = true;
     setAddressSearch(feature.full_address);
     setLocationSuggestions([]);
@@ -117,6 +160,7 @@ export default function AuditWizard() {
       address: feature.full_address,
       lng: feature.center[0],
       lat: feature.center[1],
+      ...preset,
     });
   };
 
@@ -193,8 +237,9 @@ export default function AuditWizard() {
   };
 
   const runFullAnalysis = async () => {
-    if (files.length === 0 && buildingInfo.squareFeet === 0) {
-      setAnalysisError("Add at least one utility bill and basic building data before running the audit.");
+    const missingProfileFields = getMissingProfileFields(buildingInfo);
+    if (missingProfileFields.length > 0) {
+      setAnalysisError(`Confirm the ${missingProfileFields.join(", ")} before running the audit.`);
       return;
     }
 

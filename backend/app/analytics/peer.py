@@ -310,7 +310,7 @@ def _infer_pba_codes(building: BuildingProfile) -> list[int]:
 def _infer_census_division(address: str) -> int | None:
     normalized = _normalize_text(address)
     for token, division in STATE_TO_CENSUS_DIVISION.items():
-        if re.search(rf"(^|\\s){re.escape(token)}(\\s|$)", normalized):
+        if re.search(rf"(^|\s){re.escape(token)}(\s|$)", normalized):
             return division
     return None
 
@@ -344,7 +344,7 @@ def _normalize_floor_count(floors: int) -> int:
 
 
 def _climate_zone_to_pubclim(climate_zone: str) -> int | None:
-    match = re.match(r"^(\\d+)", climate_zone or "")
+    match = re.match(r"^(\d+)", climate_zone or "")
     if not match:
         return None
     zone = int(match.group(1))
