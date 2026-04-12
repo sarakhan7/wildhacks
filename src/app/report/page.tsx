@@ -314,7 +314,7 @@ function ReportContent() {
                 <div className="font-heading text-[1.35rem] font-bold tracking-[-0.05em] text-navy">04 · Financial model</div>
               </div>
               <div className="h-[18rem]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <LineChart data={financialData}>
                     <XAxis
                       dataKey="year"
