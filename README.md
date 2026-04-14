@@ -70,7 +70,7 @@ AuditAI was built using a modern, agentic development workflow and high-performa
    ```
 
 4. **Access the App**:
-   Visit [http://localhost:3000](http://localhost:3000) to start your first audit.
+   Visit architec.tech to start your first audit.
 
 ---
 *Built for WildHacks 2026.*
