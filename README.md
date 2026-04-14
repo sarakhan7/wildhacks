@@ -1,10 +1,10 @@
-# AuditAI
+# Architec
 
-AuditAI is a next-generation energy audit platform that transforms hours of manual utility bill analysis and building inspections into a 10-minute automated pipeline. By combining high-accuracy OCR with site-specific AI reasoning and interactive 3D visualizations, AuditAI provides building owners with professional-grade energy insights at zero cost.
+Architec is a next-generation energy audit platform that transforms hours of manual utility bill analysis and building inspections into a 10-minute automated pipeline. By combining high-accuracy OCR with site-specific AI reasoning and interactive 3D visualizations, Architec provides building owners with professional-grade energy insights at zero cost.
 
 ## The Product
 
-Traditional commercial energy audits cost between $15,000 and $50,000 and take months to complete. AuditAI bypasses this overhead by allowing users to simply describe their building and upload 12 months of utility bills. 
+Traditional commercial energy audits cost between $15,000 and $50,000 and take months to complete. Architec bypasses this overhead by allowing users to simply describe their building and upload 12 months of utility bills. 
 
 ### Key Features
 - **AI Bill Parsing**: Automatically extracts kWh, therms, peak demand, and costs from PDF and image-based utility bills using Google Gemini 3.0 Flash.
